@@ -23,10 +23,13 @@
 
 - `:app:processDebugMainManifest :app:processReleaseMainManifest --no-configuration-cache --console=plain`：通过。处理了版本配置；这不是 APK 构建、安装或设备验证。
 - Gradle 仍提示旧 Android DSL/variant API 和 Baseline Profile 插件版本适配警告；本轮未变更这些依赖，不把警告当成本次新增故障。
-- 公开源码隐私审计使用仓库外 denylist，通过；最终上传集合和远端检查在本页收口时记录。
-- 文档链接、归档完整性和夹具保留由主代理与独立复核检查。
+- 公开源码隐私审计使用仓库外 denylist，通过；514 个公开文件，508 个文本文件、0 个归档、0 张图片，未纳入历史裸证据或私人材料。
+- 20 份当前 Markdown 的 291 个本地链接无断链；555 个归档逐项 SHA-256 一致；8 份公开 TXT、10 个 QA 脚本、12 份 Room schema 保留。归档原文中的历史路径通过归档映射查找，不改写历史记录。
+- 合并后的 Manifest 已核对：Debug 为 `1.0.0-debug / 8`，Release 为 `1.0.0 / 8`。
 - 未跑全量测试、私人 TXT 或模拟器，因为没有改动对应业务逻辑；旧版本验证结果仅作为历史证据引用。
 
 ## GitHub 状态
 
-已备份旧远端并准备新源码基线，删除重建与远端上传验证待执行。不代表新仓库或新安装包已经发布。
+旧 [ikaros0202/NewMyBook](https://github.com/ikaros0202/NewMyBook) 已删除并同名重建，仓库 ID 与备份中的旧 ID 不同。新默认分支为 `main`，公开文件集为 514 个；已通过 GitHub tree API 将每个文件路径和 blob SHA 与本地提交逐项对比，差异为 0。新仓库的 tags 和 releases 数量均为 0。
+
+旧提交、`v0.1.4` 标签、Release 元数据和 APK 附件保存在仓库外备份。旧的 `NewMyBook-public` checkout 已退出 Git 管理，当前工作区是新源码的维护入口。本轮只公开源码；没有创建 1.0.0 安装包或 Release。
