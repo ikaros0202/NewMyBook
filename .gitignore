@@ -1,0 +1,41 @@
+*.iml
+.agents/
+.codex/
+.gradle/
+.kotlin/
+.idea/
+.superpowers/
+build/
+local.properties
+**/build/
+
+# Machine-local and private QA material
+private-local/
+private-qa/
+.privacy-denylist.local.txt
+*.local
+*.jks
+*.keystore
+*.p12
+*.pem
+*.key
+
+# Local history and release artifacts are not part of the new source baseline.
+/archive/
+/dist/
+
+# Publish reusable QA scripts and synthetic fixtures, not historical raw evidence.
+/qa/*
+!/qa/README.md
+!/qa/scripts/
+!/qa/current/
+!/qa/sample-novel.txt
+!/qa/blank-whitespace.txt
+!/qa/encoding-uncertain.txt
+!/qa/metadata-extraction.txt
+!/qa/multi-one.txt
+!/qa/multi-two.txt
+!/qa/preflight-valid.txt
+!/qa/v1.6/
+/qa/v1.6/*
+!/qa/v1.6/structured-txt-sample.txt

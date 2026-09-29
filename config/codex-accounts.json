@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 2,
+  "updatedAt": "2026-09-29",
+  "workspace": "%XINYUE_WORKSPACE%",
+  "sharedProfile": {
+    "windowsUser": "%USERNAME%",
+    "startupFiles": [
+      "AGENTS.md",
+      "docs/BASELINE.md",
+      "tasks/current.md"
+    ],
+    "documentationIndex": "docs/README.md",
+    "handoffFile": "tasks/current.md",
+    "baselineFile": "docs/BASELINE.md",
+    "jdk17Home": "%JAVA_HOME%",
+    "androidSdkRoot": "%ANDROID_SDK_ROOT%",
+    "primaryAvd": "XinYue_API37",
+    "privateQaRootEnvironmentVariable": "XINYUE_PRIVATE_QA_ROOT"
+  },
+  "accounts": {
+    "account_a": {
+      "label": "Codex 账号 A",
+      "inherits": "sharedProfile"
+    },
+    "account_b": {
+      "label": "Codex 账号 B",
+      "inherits": "sharedProfile"
+    }
+  },
+  "security": {
+    "storeAuthentication": false,
+    "forbiddenFields": [
+      "email",
+      "password",
+      "accessToken",
+      "refreshToken",
+      "cookie",
+      "apiKey",
+      "recoveryCode"
+    ]
+  }
+}
