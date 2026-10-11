@@ -84,7 +84,10 @@ try {
     } finally { $ErrorActionPreference = $oldPreference }
     Assert-True ($badExit -ne 0) '16 KiB row accepted a 4 KiB endpoint'
 } finally {
-    if (Test-Path -LiteralPath $testRoot) { Remove-Item -LiteralPath $testRoot -Recurse -Force }
+    $resolvedTestRoot = [IO.Path]::GetFullPath($testRoot)
+    $expectedTestRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot 'qa\staging\accessibility-contract'))
+    if ($resolvedTestRoot -ne $expectedTestRoot) { throw 'Refusing cleanup outside the accessibility contract workspace' }
+    if (Test-Path -LiteralPath $resolvedTestRoot) { Remove-Item -LiteralPath $resolvedTestRoot -Recurse -Force }
 }
 
 Write-Output 'PASS: V1.2 accessibility-matrix dry-run contract'

@@ -63,11 +63,9 @@ class BackupAssetInventory internal constructor(
                 it.copy(originalAssetPath = null, normalizedAssetPath = null, offsetIndexAssetPath = null)
             }
         }
-        val adjustedCatalog = snapshot.copy(
-            books = adjustedBooks,
-            fonts = if (options.includeFonts) snapshot.fonts else emptyList(),
-            fontSources = if (options.includeFonts) snapshot.fontSources else emptyList(),
-        )
+        val adjustedCatalog = snapshot.copy(books = adjustedBooks).let {
+            if (options.includeFonts) it else it.withoutImportedFonts()
+        }
         return BackupAssetInventoryResult(adjustedCatalog, assets)
     }
 

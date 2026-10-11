@@ -9,10 +9,12 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -23,6 +25,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.xinyue.reader.core.domain.model.AnnotationExportFormat
 import com.xinyue.reader.core.domain.model.AnnotationKind
@@ -101,6 +104,7 @@ internal fun ReaderAnnotationPanel(
     )
 
     if (exporting) {
+        var exportFormat by remember { mutableStateOf(AnnotationExportFormat.MARKDOWN) }
         var includeBookmarks by remember { mutableStateOf(false) }
         AlertDialog(
             onDismissRequest = { exporting = false },
@@ -108,6 +112,30 @@ internal fun ReaderAnnotationPanel(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("导出文件仅保存到你通过系统文件选择器指定的位置。")
+                    Text(
+                        "格式",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                    listOf(
+                        AnnotationExportFormat.MARKDOWN to "Markdown",
+                        AnnotationExportFormat.JSON to "JSON",
+                    ).forEach { (format, label) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp)
+                                .selectable(
+                                    selected = exportFormat == format,
+                                    role = Role.RadioButton,
+                                    onClick = { exportFormat = format },
+                                ),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(selected = exportFormat == format, onClick = null)
+                            Text(label)
+                        }
+                    }
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -124,20 +152,14 @@ internal fun ReaderAnnotationPanel(
                 TextButton(
                     onClick = {
                         exporting = false
-                        onExport(AnnotationExportFormat.MARKDOWN, includeBookmarks)
+                        onExport(exportFormat, includeBookmarks)
                     },
-                ) { Text("导出 Markdown") }
+                    enabled = !isExporting,
+                    modifier = Modifier.testTag("reader-annotation-export-confirm"),
+                ) { Text(if (isExporting) "正在导出…" else "导出") }
             },
             dismissButton = {
-                Row {
-                    TextButton(
-                        onClick = {
-                            exporting = false
-                            onExport(AnnotationExportFormat.JSON, includeBookmarks)
-                        },
-                    ) { Text("导出 JSON") }
-                    TextButton(onClick = { exporting = false }) { Text("取消") }
-                }
+                TextButton(onClick = { exporting = false }, enabled = !isExporting) { Text("取消") }
             },
         )
     }

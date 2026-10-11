@@ -19,6 +19,28 @@ import kotlin.test.assertFailsWith
 
 class SearchIndexCoordinatorTest {
     @Test
+    fun `search finds phrases across chunk and read window boundaries including supplementary characters`() = runTest {
+        val queries = listOf("春夏秋冬", "😀😃😄风景", "甲".repeat(20_000) + "乙")
+        for (query in queries) {
+            for (boundary in listOf(16 * 1024, 256 * 1024)) {
+                val start = boundary - if (query.startsWith("😀")) 2 else 3
+                val text = "丙".repeat(start) + query + "丁".repeat(32)
+                val dao = FakeSearchIndexDao()
+                val source = FakeTextSource(text)
+                val books = FakeBookRepository(sampleBook(text.length.toLong()))
+                SearchIndexCoordinator(books, source, dao, EpochClock { 99L }).build("book-1")
+                val scheduler = object : SearchIndexScheduler {
+                    override fun ensure(bookId: String) = error("index should be ready")
+                    override fun rebuild(bookId: String) = Unit
+                    override fun cancel(bookId: String) = Unit
+                }
+                val results = RoomBookSearchRepository(dao, books, scheduler, source).search("book-1", query, 10)
+                assertThat(results.map { it.offset }).containsExactly(start.toLong())
+                assertThat(results.single().snippet.substring(results.single().highlightStart, results.single().highlightEnd)).isEqualTo(query)
+            }
+        }
+    }
+    @Test
     fun `successful rebuild is bounded and activates only after complete indexing`() = runTest {
         val content = "甲乙丙丁".repeat(180_000)
         val dao = FakeSearchIndexDao().apply {
@@ -128,12 +150,21 @@ class SearchIndexCoordinatorTest {
             bookId: String,
             matchQuery: String,
             limit: Int,
-        ): List<SearchChunkHit> = emptyList()
+            afterRowId: Long,
+        ): List<SearchChunkHit> = matching(matchQuery.removeSurrounding("\"").replace("\"\"", "\""), limit, afterRowId)
         override suspend fun searchShort(
             bookId: String,
             likePattern: String,
             limit: Int,
-        ): List<SearchChunkHit> = emptyList()
+            afterRowId: Long,
+        ): List<SearchChunkHit> = matching(likePattern.removeSurrounding("%"), limit, afterRowId)
+
+        private fun matching(prefix: String, limit: Int, afterRowId: Long): List<SearchChunkHit> = chunks.mapIndexedNotNull { index, chunk ->
+            val rowId = index + 1L
+            if (rowId > afterRowId && chunk.generationId == state.value?.activeGenerationId && chunk.content.contains(prefix)) {
+                SearchChunkHit(rowId, null, chunk.startOffset, chunk.content, "")
+            } else null
+        }.take(limit)
     }
 
     private class FakeBookRepository(private val book: Book) : BookRepository {

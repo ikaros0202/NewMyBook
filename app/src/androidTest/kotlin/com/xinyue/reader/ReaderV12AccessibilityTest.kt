@@ -116,10 +116,10 @@ class ReaderV12AccessibilityTest {
         compose.onNodeWithTag("settings_list").performScrollToNode(hasTestTag("settings_backup"))
         compose.onNodeWithTag("settings_backup").performClick()
         awaitTag("backup_root")
-        compose.onNodeWithText("开始导出").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("选择备份文件").performScrollTo().assertIsDisplayed()
-        assertTouchTarget(compose.onNodeWithText("开始导出").fetchSemanticsNode().boundsInRoot, "backup export")
-        assertTouchTarget(compose.onNodeWithText("选择备份文件").fetchSemanticsNode().boundsInRoot, "backup restore")
+        compose.onNodeWithText("导出备份").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("从备份恢复").performScrollTo().assertIsDisplayed()
+        assertTouchTarget(compose.onNodeWithText("导出备份").fetchSemanticsNode().boundsInRoot, "backup export")
+        assertTouchTarget(compose.onNodeWithText("从备份恢复").fetchSemanticsNode().boundsInRoot, "backup restore")
     }
 
     @Test

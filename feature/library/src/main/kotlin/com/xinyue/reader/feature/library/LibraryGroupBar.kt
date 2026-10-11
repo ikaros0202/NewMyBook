@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.DropdownMenu
@@ -49,7 +51,8 @@ internal fun LibraryGroupBar(
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState())
                 .testTag("library-status-filters"),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
         ) {
         statusFilters.forEach { item ->
             val isSelected = selectedFilter == item.filter
@@ -84,13 +87,17 @@ internal fun LibraryGroupBar(
                     verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = selectedGroup?.name ?: if (moreSelected) selectedFilter.label else "集合",
-                        color = if (moreSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.labelLarge,
+                        text = selectedGroup?.name ?: if (moreSelected) selectedFilter.label else "更多筛选",
+                        color = if (moreSelected) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.86f)
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
                     )
                     Icon(
                         painter = painterResource(XinYueIcons.MoreHorizontal),
-                        contentDescription = "更多集合筛选",
+                        contentDescription = "更多书架筛选",
                         modifier = Modifier.padding(start = 2.dp),
                     )
                 }
@@ -109,7 +116,7 @@ internal fun LibraryGroupBar(
                     },
                 )
                 FilterMenuItem(
-                    label = "最近阅读",
+                    label = "近30天",
                     selected = selectedFilter == LibraryFilter.Recent,
                     tag = "library-status-recent",
                     onClick = {
@@ -175,28 +182,28 @@ private fun StatusFilterButton(
         shape = androidx.compose.ui.graphics.RectangleShape,
         modifier = modifier.semantics { this.selected = selected },
     ) {
-        Column(
-            horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+        Box(
+            modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
+            contentAlignment = androidx.compose.ui.Alignment.Center,
         ) {
             Text(
                 text = label,
-                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelLarge,
+                color = if (selected) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.86f)
+                },
+                style = MaterialTheme.typography.bodyMedium,
             )
-            androidx.compose.foundation.layout.Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 2.dp)
-                    .padding(top = 2.dp),
-            ) {
-                if (selected) {
-                    androidx.compose.foundation.layout.Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 2.dp)
-                            .background(MaterialTheme.colorScheme.primary),
-                    )
-                }
+            if (selected) {
+                Box(
+                    modifier = Modifier
+                        .align(androidx.compose.ui.Alignment.BottomCenter)
+                        .padding(bottom = 5.dp)
+                        .fillMaxWidth()
+                        .height(2.dp)
+                        .background(MaterialTheme.colorScheme.primary),
+                )
             }
         }
     }
@@ -243,7 +250,7 @@ private val statusFilters = listOf(
 private val LibraryFilter.label: String
     get() = when (this) {
         LibraryFilter.All -> "全部"
-        LibraryFilter.Recent -> "最近阅读"
+        LibraryFilter.Recent -> "近30天"
         LibraryFilter.Unread -> "未读"
         LibraryFilter.Reading -> "阅读中"
         LibraryFilter.Finished -> "已读"

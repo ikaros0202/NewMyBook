@@ -62,8 +62,71 @@ import kotlin.coroutines.CoroutineContext
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ReaderViewModelTest {
+    @Test fun searchValidationDoesNotReplaceReadableContent() = runTest(mainDispatcherRule.dispatcher) {
+        val vm = ReaderViewModel(FakeRepository(savedOffset = 0), FakeBookTextSource("公开正文内容"), EpochClock { 99L },
+            FakeReaderSettingsRepository(), FakeBookPaginator(2), FakeBookmarkRepository(), Dispatchers.Unconfined)
+        vm.open("book-1", 2)
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.errorMessage).isNull()
+        assertThat("书 ".codePointCount(0, 2)).isEqualTo(2)
+        vm.search("书 ")
+        assertThat(vm.uiState.value.errorMessage).isNull()
+        assertThat(vm.uiState.value.searchErrorMessage).isEqualTo("请至少输入两个字符")
+        assertThat(vm.uiState.value.pages).isNotEmpty()
+        vm.leaveReader {}
+        runCurrent()
+    }
+
+    @Test fun preexistingOverridesSurviveAnAsynchronousOpen() = runTest(mainDispatcherRule.dispatcher) {
+        val settings = FakeReaderSettingsRepository()
+        settings.bookOverrides["book-1"] = ReaderSettingsOverrides(fontSizeSp = 30f)
+        val source = object : TextSource {
+            private val delegate = FakeBookTextSource("公开正文内容")
+            override suspend fun readWindow(normalizedPath: String, anchorOffset: Long, beforeUtf16Units: Int, afterUtf16Units: Int): TextWindow {
+                delay(1)
+                return delegate.readWindow(normalizedPath, anchorOffset, beforeUtf16Units, afterUtf16Units)
+            }
+        }
+        val vm = ReaderViewModel(FakeRepository(savedOffset = 0), source, EpochClock { 99L },
+            settings, FakeBookPaginator(2), FakeBookmarkRepository(), Dispatchers.Unconfined)
+        vm.open("book-1", 2)
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.settings.fontSizeSp).isEqualTo(30f)
+        assertThat(vm.uiState.value.bookAppearanceOverrides).isEqualTo(ReaderSettingsOverrides(fontSizeSp = 30f))
+        vm.leaveReader {}
+        runCurrent()
+    }
+
+    @Test fun sameBookReopenRestartsThemeAutomation() = runTest(mainDispatcherRule.dispatcher) {
+        val schedule = ViewModelScheduleRepository(ReaderThemeSchedule(mode = ThemeScheduleMode.FOLLOW_SYSTEM))
+        val dark = MutableStateFlow(false)
+        val clock = EpochClock { 99L }
+        val manager = ReaderThemeManager(ViewModelThemeRepository(), clock)
+        val controller = ReaderThemeScheduleController(schedule, manager.observeThemes(), dark, flowOf(Unit), clock,
+            { java.time.ZoneId.of("UTC") }, { kotlinx.coroutines.delay(it) })
+        val vm = ReaderViewModel(FakeRepository(savedOffset = 0), FakeBookTextSource("公开正文内容"), clock,
+            FakeReaderSettingsRepository(), FakeBookPaginator(2), FakeBookmarkRepository(), Dispatchers.Unconfined,
+            themeManager = manager, themeScheduleRepository = schedule, themeScheduleController = controller)
+        vm.open("book-1", 2)
+        repeat(100) { kotlinx.coroutines.yield(); runCurrent() }
+        assertThat(controller.isRunning).isTrue()
+        vm.leaveReader {}
+        runCurrent()
+        assertThat(controller.isRunning).isFalse()
+        vm.onReaderForeground("book-1")
+        vm.open("book-1", 2)
+        repeat(100) { kotlinx.coroutines.yield(); runCurrent() }
+        assertThat(controller.isRunning).isTrue()
+        dark.value = true
+        repeat(100) { kotlinx.coroutines.yield(); runCurrent() }
+        assertThat(vm.uiState.value.settings.backgroundArgb).isEqualTo(ReaderThemeManager.BUILT_IN_THEMES.first { it.id == com.xinyue.reader.core.domain.model.BUILT_IN_DARK_ID }.settings.backgroundArgb)
+        vm.leaveReader {}
+        runCurrent()
+    }
+
+
     @get:Rule
-    private val mainDispatcherRule = MainDispatcherRule()
+    val mainDispatcherRule = MainDispatcherRule()
 
     @Test
     fun `statistics end failure does not block stable progress flush or reader exit`() =
@@ -1567,6 +1630,225 @@ class ReaderViewModelTest {
         }
 
     @Test
+    fun `page turns after returning from temporary browsing commit the restored stable position`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val repository = FakeRepository(savedOffset = 4, contentLength = 16)
+            val viewModel = ReaderViewModel(
+                repository,
+                FakeBookTextSource("甲乙丙丁戊己庚辛壬癸子丑寅卯辰巳"),
+                EpochClock { 99L },
+                FakeReaderSettingsRepository(),
+                FakeBookPaginator(pageSize = 4),
+                FakeBookmarkRepository(),
+                Dispatchers.Unconfined,
+            )
+            viewModel.open("book-1", pageUtf16Units = 4)
+            advanceUntilIdle()
+
+            viewModel.jumpTemporarily(8, ReaderJumpReason.SEARCH)
+            advanceUntilIdle()
+            viewModel.returnToOrigin()
+            advanceUntilIdle()
+
+            assertThat(viewModel.uiState.value.anchorOffset).isEqualTo(4)
+            assertThat(viewModel.uiState.value.isBrowsingTemporarily).isFalse()
+            assertThat(viewModel.uiState.value.stableAnchorOffset).isEqualTo(4)
+            assertThat(repository.savedProgress).isNull()
+
+            viewModel.goToPage(2)
+            advanceUntilIdle()
+            viewModel.flushProgress()
+
+            assertThat(viewModel.uiState.value.anchorOffset).isEqualTo(8)
+            assertThat(viewModel.uiState.value.stableAnchorOffset).isEqualTo(8)
+            assertThat(repository.savedProgress?.anchor?.offset).isEqualTo(8L)
+        }
+
+    @Test
+    fun `chapter jump from temporary browsing returns to the formal progress origin`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val repository = FakeRepository(savedOffset = 4, contentLength = 16)
+            val viewModel = ReaderViewModel(
+                repository,
+                FakeBookTextSource("甲乙丙丁戊己庚辛壬癸子丑寅卯辰巳"),
+                EpochClock { 99L },
+                FakeReaderSettingsRepository(),
+                FakeBookPaginator(pageSize = 4),
+                FakeBookmarkRepository(),
+                Dispatchers.Unconfined,
+            )
+            viewModel.open("book-1", pageUtf16Units = 4)
+            advanceUntilIdle()
+
+            viewModel.jumpTemporarily(8, ReaderJumpReason.SEARCH)
+            advanceUntilIdle()
+            viewModel.jumpToChapter(12)
+            advanceUntilIdle()
+            viewModel.flushProgress()
+
+            assertThat(viewModel.uiState.value.anchorOffset).isEqualTo(12)
+            assertThat(viewModel.uiState.value.stableAnchorOffset).isEqualTo(12)
+            assertThat(viewModel.uiState.value.isBrowsingTemporarily).isFalse()
+            assertThat(viewModel.uiState.value.canReturnToOrigin).isTrue()
+            assertThat(repository.savedProgress?.anchor?.offset).isEqualTo(12L)
+
+            viewModel.returnToOrigin()
+            advanceUntilIdle()
+            viewModel.flushProgress()
+
+            assertThat(viewModel.uiState.value.anchorOffset).isEqualTo(4)
+            assertThat(viewModel.uiState.value.stableAnchorOffset).isEqualTo(4)
+            assertThat(viewModel.uiState.value.isBrowsingTemporarily).isFalse()
+            assertThat(viewModel.uiState.value.canReturnToOrigin).isFalse()
+            assertThat(repository.savedProgress?.anchor?.offset).isEqualTo(4L)
+        }
+
+    @Test
+    fun `continuing temporary browsing while a jump is loading does not commit the pending anchor`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val content = "甲".repeat(300_000)
+            val repository = FakeRepository(savedOffset = 0, contentLength = content.length.toLong())
+            val source = BlockingNavigationTextSource(content, blockedAnchor = 200_000)
+            val viewModel = ReaderViewModel(
+                repository,
+                source,
+                EpochClock { 99L },
+                FakeReaderSettingsRepository(),
+                FakeBookPaginator(pageSize = 850),
+                FakeBookmarkRepository(),
+                Dispatchers.Unconfined,
+            )
+            viewModel.open("book-1", pageUtf16Units = 850)
+            advanceUntilIdle()
+
+            viewModel.jumpTemporarily(850, ReaderJumpReason.SEARCH)
+            advanceUntilIdle()
+            viewModel.jumpTemporarily(200_000, ReaderJumpReason.BOOKMARK)
+            runCurrent()
+            source.targetReadStarted.await()
+
+            assertThat(viewModel.uiState.value.isPaginating).isTrue()
+            viewModel.continueFromHere()
+
+            assertThat(viewModel.uiState.value.isBrowsingTemporarily).isTrue()
+            assertThat(viewModel.uiState.value.stableAnchorOffset).isEqualTo(0)
+            assertThat(repository.savedProgress).isNull()
+
+            source.releaseTargetRead.complete(Unit)
+            advanceUntilIdle()
+
+            assertThat(viewModel.uiState.value.anchorOffset).isEqualTo(200_000)
+            assertThat(viewModel.uiState.value.stableAnchorOffset).isEqualTo(0)
+            assertThat(viewModel.uiState.value.isBrowsingTemporarily).isTrue()
+            assertThat(repository.savedProgress).isNull()
+        }
+
+    @Test
+    fun `latest chapter selection replaces an unfinished window jump`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            for (latestTarget in listOf(850, 220_000)) {
+                val content = "甲".repeat(300_000)
+                val repository = FakeRepository(savedOffset = 0, contentLength = content.length.toLong())
+                val source = BlockingNavigationTextSource(content, blockedAnchor = 200_000)
+                val viewModel = ReaderViewModel(
+                    repository, source, EpochClock { 99L }, FakeReaderSettingsRepository(),
+                    FakeBookPaginator(pageSize = 850), FakeBookmarkRepository(), Dispatchers.Unconfined,
+                )
+                viewModel.open("book-1", pageUtf16Units = 850)
+                advanceUntilIdle()
+                viewModel.jumpToChapter(200_000)
+                runCurrent()
+                source.targetReadStarted.await()
+
+                viewModel.jumpToChapter(latestTarget)
+                runCurrent()
+                source.releaseTargetRead.complete(Unit)
+                advanceUntilIdle()
+                viewModel.flushProgress()
+
+                assertThat(viewModel.uiState.value.anchorOffset).isEqualTo(latestTarget)
+                assertThat(viewModel.uiState.value.stableAnchorOffset).isEqualTo(latestTarget)
+                assertThat(repository.savedProgress?.anchor?.offset).isEqualTo(latestTarget.toLong())
+                viewModel.returnToOrigin()
+                advanceUntilIdle()
+                assertThat(viewModel.uiState.value.anchorOffset).isEqualTo(0)
+            }
+        }
+
+    @Test
+    fun `failed chapter repagination keeps the old pages and reports a navigation error`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val repository = FakeRepository(savedOffset = 4, contentLength = 16)
+            val paginator = NavigationFailurePaginator()
+            val viewModel = ReaderViewModel(
+                repository,
+                FakeBookTextSource("甲乙丙丁戊己庚辛壬癸子丑寅卯辰巳"),
+                EpochClock { 99L },
+                FakeReaderSettingsRepository(),
+                paginator,
+                FakeBookmarkRepository(),
+                mainDispatcherRule.dispatcher,
+                chapterIndexStore = FakeChapterIndexStore().apply {
+                    snapshot = ChapterIndexSnapshot(listOf(DetectedChapter("正文", 0)), manuallyEdited = true)
+                },
+            )
+            viewModel.open("book-1", pageUtf16Units = 4)
+            advanceUntilIdle()
+            val spec = ReaderLayoutSpec(300, 500, 40f, 64f)
+            viewModel.updateLayout(spec)
+            advanceUntilIdle()
+            val beforeFailure = viewModel.uiState.value
+            assertThat(beforeFailure.errorMessage).isNull()
+            assertThat(beforeFailure.pages).containsExactly(ReaderPage(0, 4))
+            paginator.failNextPrecise = true
+
+            viewModel.jumpToChapter(8)
+            advanceUntilIdle()
+
+            val state = viewModel.uiState.value
+            assertThat(state.navigationErrorMessage).isEqualTo("重新排版失败")
+            assertThat(state.pages).isEqualTo(beforeFailure.pages)
+            assertThat(state.content).isEqualTo(beforeFailure.content)
+            assertThat(state.layoutContent).isEqualTo(beforeFailure.layoutContent)
+            assertThat(state.chapterTitleRanges).isEqualTo(beforeFailure.chapterTitleRanges)
+            assertThat(state.currentPageIndex).isEqualTo(beforeFailure.currentPageIndex)
+            assertThat(state.anchorOffset).isEqualTo(beforeFailure.anchorOffset)
+            assertThat(state.stableAnchorOffset).isEqualTo(beforeFailure.stableAnchorOffset)
+            assertThat(state.isPaginating).isFalse()
+            assertThat(state.errorMessage).isNull()
+            assertThat(state.navigationErrorMessage).isEqualTo("重新排版失败")
+            assertThat(repository.savedProgress).isNull()
+        }
+
+    @Test
+    fun `failed settings repagination keeps the regular error semantics`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val repository = FakeRepository(savedOffset = 4, contentLength = 16)
+            val paginator = NavigationFailurePaginator().apply { failNextPrecise = true }
+            val viewModel = ReaderViewModel(
+                repository,
+                FakeBookTextSource("甲乙丙丁戊己庚辛壬癸子丑寅卯辰巳"),
+                EpochClock { 99L },
+                FakeReaderSettingsRepository(),
+                paginator,
+                FakeBookmarkRepository(),
+                mainDispatcherRule.dispatcher,
+                chapterIndexStore = FakeChapterIndexStore().apply {
+                    snapshot = ChapterIndexSnapshot(listOf(DetectedChapter("正文", 0)), manuallyEdited = true)
+                },
+            )
+            viewModel.open("book-1", pageUtf16Units = 4)
+            advanceUntilIdle()
+
+            viewModel.updateLayout(ReaderLayoutSpec(300, 500, 40f, 64f))
+            advanceUntilIdle()
+
+            assertThat(viewModel.uiState.value.errorMessage).isEqualTo("重新排版失败")
+            assertThat(viewModel.uiState.value.navigationErrorMessage).isNull()
+            assertThat(viewModel.uiState.value.isPaginating).isFalse()
+        }
+
+    @Test
     fun `chapter jump starts the visible page at the chapter heading`() =
         runTest(mainDispatcherRule.dispatcher) {
             val content = "序言正文第一章正文第二章后续正文"
@@ -1602,6 +1884,195 @@ class ReaderViewModelTest {
 
             val state = viewModel.uiState.value
             assertThat(state.pages[state.currentPageIndex].startOffset).isEqualTo(secondChapterStart)
+        }
+
+    @Test
+    fun `chapter selection commits progress while retaining a return to the previous position`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val repository = FakeRepository(savedOffset = 4, contentLength = 16)
+            val viewModel = ReaderViewModel(
+                repository,
+                FakeBookTextSource("甲乙丙丁戊己庚辛壬癸子丑寅卯辰巳"),
+                EpochClock { 99L },
+                FakeReaderSettingsRepository(),
+                FakeBookPaginator(pageSize = 4),
+                FakeBookmarkRepository(),
+                Dispatchers.Unconfined,
+            )
+            viewModel.open("book-1", pageUtf16Units = 4)
+            advanceUntilIdle()
+
+            viewModel.jumpToChapter(8)
+            advanceUntilIdle()
+            viewModel.flushProgress()
+
+            assertThat(viewModel.uiState.value.anchorOffset).isEqualTo(8)
+            assertThat(viewModel.uiState.value.stableAnchorOffset).isEqualTo(8)
+            assertThat(viewModel.uiState.value.isBrowsingTemporarily).isFalse()
+            assertThat(viewModel.uiState.value.canReturnToOrigin).isTrue()
+            assertThat(repository.savedProgress?.anchor?.offset).isEqualTo(8L)
+
+            viewModel.goToPage(3)
+            advanceUntilIdle()
+            viewModel.flushProgress()
+            assertThat(viewModel.uiState.value.stableAnchorOffset).isEqualTo(12)
+            assertThat(repository.savedProgress?.anchor?.offset).isEqualTo(12L)
+
+            viewModel.returnToOrigin()
+            advanceUntilIdle()
+            viewModel.flushProgress()
+
+            assertThat(viewModel.uiState.value.anchorOffset).isEqualTo(4)
+            assertThat(viewModel.uiState.value.stableAnchorOffset).isEqualTo(4)
+            assertThat(viewModel.uiState.value.canReturnToOrigin).isFalse()
+            assertThat(repository.savedProgress?.anchor?.offset).isEqualTo(4L)
+        }
+
+    @Test
+    fun `failed chapter jump does not commit target or navigation state`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val content = "甲".repeat(300_000)
+            val repository = FakeRepository(savedOffset = 4, contentLength = content.length.toLong())
+            val viewModel = ReaderViewModel(
+                repository,
+                FailingNavigationTextSource(content, failAnchor = 200_000),
+                EpochClock { 99L },
+                FakeReaderSettingsRepository(),
+                FakeBookPaginator(pageSize = 850),
+                FakeBookmarkRepository(),
+                Dispatchers.Unconfined,
+            )
+            viewModel.open("book-1", pageUtf16Units = 850)
+            advanceUntilIdle()
+            val beforeFailure = viewModel.uiState.value
+            val beforePageText = beforeFailure.textFor(beforeFailure.pages[beforeFailure.currentPageIndex])
+
+            viewModel.jumpToChapter(200_000)
+            advanceUntilIdle()
+
+            val state = viewModel.uiState.value
+            assertThat(state.anchorOffset).isEqualTo(4)
+            assertThat(state.stableAnchorOffset).isEqualTo(4)
+            assertThat(state.canReturnToOrigin).isFalse()
+            assertThat(state.isBrowsingTemporarily).isFalse()
+            assertThat(state.errorMessage).isNull()
+            assertThat(state.navigationErrorMessage).isEqualTo("读取正文失败")
+            assertThat(state.content).isEqualTo(beforeFailure.content)
+            assertThat(state.pages).isEqualTo(beforeFailure.pages)
+            assertThat(state.textFor(state.pages[state.currentPageIndex])).isEqualTo(beforePageText)
+            assertThat(repository.savedProgress).isNull()
+
+            viewModel.jumpTemporarily(4, ReaderJumpReason.SEARCH)
+            advanceUntilIdle()
+            assertThat(viewModel.uiState.value.navigationErrorMessage).isNull()
+            assertThat(viewModel.uiState.value.content).isEqualTo(beforeFailure.content)
+        }
+
+    @Test
+    fun `chapter reanalysis cancels an unfinished indexed page jump without stale loading`() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val content = "甲".repeat(300_000)
+            val targetReadStarted = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val releaseTargetRead = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val analysisStarted = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val releaseAnalysis = kotlinx.coroutines.CompletableDeferred<Unit>()
+            var targetOffset = -1
+            val source = object : TextSource {
+                override suspend fun readWindow(
+                    normalizedPath: String,
+                    anchorOffset: Long,
+                    beforeUtf16Units: Int,
+                    afterUtf16Units: Int,
+                ): TextWindow {
+                    if (anchorOffset == targetOffset.toLong() &&
+                        beforeUtf16Units == 50_000 &&
+                        afterUtf16Units >= 100_000
+                    ) {
+                        targetReadStarted.complete(Unit)
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                            releaseTargetRead.await()
+                        }
+                    }
+                    val safeAnchor = anchorOffset.coerceIn(0, content.length.toLong()).toInt()
+                    val start = (safeAnchor - beforeUtf16Units).coerceAtLeast(0)
+                    val end = (safeAnchor + afterUtf16Units).coerceAtMost(content.length)
+                    return TextWindow(
+                        startOffset = start.toLong(),
+                        text = content.substring(start, end),
+                        totalUtf16Length = content.length.toLong(),
+                    )
+                }
+            }
+            val chapterStore = object : ChapterIndexStore {
+                override suspend fun getSnapshot(bookId: String): ChapterIndexSnapshot =
+                    ChapterIndexSnapshot()
+
+                override suspend fun replaceAutomatically(
+                    bookId: String,
+                    chapters: List<DetectedChapter>,
+                    ruleSet: ChapterRuleSet,
+                ): Boolean = false
+
+                override suspend fun replaceManually(bookId: String, chapters: List<DetectedChapter>) = Unit
+
+                override suspend fun replaceForRuleChange(
+                    bookId: String,
+                    chapters: List<DetectedChapter>,
+                    ruleSet: ChapterRuleSet,
+                ) {
+                    analysisStarted.complete(Unit)
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                        releaseAnalysis.await()
+                    }
+                }
+            }
+            val repository = FakeRepository(savedOffset = 0, contentLength = content.length.toLong())
+            val viewModel = ReaderViewModel(
+                repository,
+                source,
+                EpochClock { 99L },
+                FakeReaderSettingsRepository(),
+                FakeBookPaginator(pageSize = 850),
+                FakeBookmarkRepository(),
+                Dispatchers.Unconfined,
+                chapterStore,
+            )
+
+            viewModel.open("book-1", pageUtf16Units = 850)
+            advanceUntilIdle()
+            viewModel.updateLayout(
+                ReaderLayoutSpec(widthPx = 300, heightPx = 500, fontSizePx = 40f, lineHeightPx = 64f),
+            )
+            advanceUntilIdle()
+            viewModel.prepareBookPageIndex()
+            advanceUntilIdle()
+
+            val indexedPages = checkNotNull(viewModel.uiState.value.bookPages)
+            val targetPage = indexedPages.first { it.startOffset >= 200_000 }
+            targetOffset = targetPage.startOffset
+            viewModel.jumpToBookPage(indexedPages.indexOf(targetPage) + 1)
+            runCurrent()
+            targetReadStarted.await()
+            assertThat(viewModel.uiState.value.isPaginating).isTrue()
+
+            viewModel.reanalyzeChapters(ChapterRuleSet.STANDARD)
+            runCurrent()
+            analysisStarted.await()
+            assertThat(viewModel.uiState.value.isPaginating).isFalse()
+
+            releaseTargetRead.complete(Unit)
+            runCurrent()
+            assertThat(viewModel.uiState.value.navigationErrorMessage).isNull()
+
+            releaseAnalysis.complete(Unit)
+            advanceUntilIdle()
+
+            val state = viewModel.uiState.value
+            assertThat(state.navigationErrorMessage).isNull()
+            assertThat(state.isPaginating).isFalse()
+            assertThat(state.anchorOffset).isEqualTo(0)
+            assertThat(state.stableAnchorOffset).isEqualTo(0)
+            assertThat(repository.savedProgress).isNull()
         }
 
     @Test
@@ -2021,6 +2492,56 @@ class ReaderViewModelTest {
             var end = (safeAnchor + afterUtf16Units).coerceAtMost(content.length)
             if (start in 1 until content.length && content[start].isLowSurrogate()) start -= 1
             if (end in 1 until content.length && content[end - 1].isHighSurrogate()) end += 1
+            return TextWindow(
+                startOffset = start.toLong(),
+                text = content.substring(start, end),
+                totalUtf16Length = content.length.toLong(),
+            )
+        }
+    }
+
+    private class FailingNavigationTextSource(
+        private val content: String,
+        private val failAnchor: Int,
+    ) : TextSource {
+        override suspend fun readWindow(
+            normalizedPath: String,
+            anchorOffset: Long,
+            beforeUtf16Units: Int,
+            afterUtf16Units: Int,
+        ): TextWindow {
+            if (anchorOffset == failAnchor.toLong()) error("controlled navigation read failure")
+            val safeAnchor = anchorOffset.coerceIn(0, content.length.toLong()).toInt()
+            val start = (safeAnchor - beforeUtf16Units).coerceAtLeast(0)
+            val end = (safeAnchor + afterUtf16Units).coerceAtMost(content.length)
+            return TextWindow(
+                startOffset = start.toLong(),
+                text = content.substring(start, end),
+                totalUtf16Length = content.length.toLong(),
+            )
+        }
+    }
+
+    private class BlockingNavigationTextSource(
+        private val content: String,
+        private val blockedAnchor: Int,
+    ) : TextSource {
+        val targetReadStarted = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val releaseTargetRead = kotlinx.coroutines.CompletableDeferred<Unit>()
+
+        override suspend fun readWindow(
+            normalizedPath: String,
+            anchorOffset: Long,
+            beforeUtf16Units: Int,
+            afterUtf16Units: Int,
+        ): TextWindow {
+            if (anchorOffset == blockedAnchor.toLong()) {
+                targetReadStarted.complete(Unit)
+                releaseTargetRead.await()
+            }
+            val safeAnchor = anchorOffset.coerceIn(0, content.length.toLong()).toInt()
+            val start = (safeAnchor - beforeUtf16Units).coerceAtLeast(0)
+            val end = (safeAnchor + afterUtf16Units).coerceAtMost(content.length)
             return TextWindow(
                 startOffset = start.toLong(),
                 text = content.substring(start, end),
@@ -2449,6 +2970,33 @@ class ReaderViewModelTest {
             }
     }
 
+    private class NavigationFailurePaginator : BookPaginator {
+        var failNextPrecise: Boolean = false
+
+        override suspend fun paginate(text: String, spec: ReaderLayoutSpec): List<ReaderPage> =
+            listOf(ReaderPage(0, text.length))
+
+        override suspend fun paginateWindow(
+            text: String,
+            spec: ReaderLayoutSpec,
+            startOffset: Int,
+            endOffset: Int,
+        ): List<ReaderPage> {
+            if (failNextPrecise) {
+                failNextPrecise = false
+                error("controlled precise pagination failure")
+            }
+            val safeStart = startOffset.coerceIn(0, text.length)
+            val safeEnd = endOffset.coerceIn(safeStart, text.length)
+            return listOf(
+                ReaderPage(
+                    startOffset = safeStart,
+                    endOffset = (safeStart + 4).coerceAtMost(safeEnd),
+                ),
+            )
+        }
+    }
+
     private class VaryingBookPaginator : BookPaginator {
         override suspend fun paginate(text: String, spec: ReaderLayoutSpec): List<ReaderPage> {
             val pageSize = (spec.widthPx / 100).coerceAtLeast(1)
@@ -2582,7 +3130,7 @@ class ReaderViewModelTest {
         }
     }
 
-    private class MainDispatcherRule(
+    class MainDispatcherRule(
         val dispatcher: TestDispatcher = StandardTestDispatcher(),
     ) : TestWatcher() {
         override fun starting(description: Description) = Dispatchers.setMain(dispatcher)

@@ -2,6 +2,7 @@ package com.xinyue.reader.feature.importing
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,6 +19,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -33,10 +36,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -45,15 +50,17 @@ import com.xinyue.reader.core.data.ImportItemState
 import com.xinyue.reader.core.data.ImportItemStatus
 import com.xinyue.reader.core.data.ImportPreflightItem
 import com.xinyue.reader.core.domain.model.Book
+import com.xinyue.reader.core.ui.XinYueIcons
 
 @Composable
 fun ImportRoute(
     onBack: () -> Unit,
+    onOpenBook: (String) -> Unit,
     viewModel: ImportViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showCharsetDialog by remember { mutableStateOf(false) }
-    var selectedCharset by remember { mutableStateOf<String?>(null) }
+    var selectedCharset by rememberSaveable { mutableStateOf<String?>(null) }
     val automaticLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         viewModel.prepareImport(uris.map { it.toString() })
     }
@@ -65,6 +72,7 @@ fun ImportRoute(
     ImportScreen(
         uiState = uiState,
         onBack = onBack,
+        onOpenBook = onOpenBook,
         onSelectFiles = { automaticLauncher.launch(arrayOf("text/plain")) },
         onSelectKnownEncoding = { showCharsetDialog = true },
         onResolveDuplicate = viewModel::resolveDuplicate,
@@ -105,6 +113,7 @@ fun ImportRoute(
 fun ImportScreen(
     uiState: ImportUiState,
     onBack: () -> Unit,
+    onOpenBook: (String) -> Unit,
     onSelectFiles: () -> Unit,
     onSelectKnownEncoding: () -> Unit,
     onResolveDuplicate: (ImportItemState, DuplicateResolution) -> Unit,
@@ -122,7 +131,11 @@ fun ImportScreen(
         topBar = {
             TopAppBar(
                 title = { Text("导入 TXT") },
-                navigationIcon = { TextButton(onClick = onBack) { Text("返回") } },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(painterResource(XinYueIcons.ArrowBack), contentDescription = "返回")
+                    }
+                },
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -133,14 +146,14 @@ fun ImportScreen(
         ) {
             item {
                 Text(
-                    "可一次选择多本小说。导入会在后台继续，离开本页后进度不会丢失。",
+                    "可一次导入多本 TXT，离开后任务继续。",
                     modifier = Modifier.padding(top = 12.dp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             item {
                 Column {
-                    Button(
+                    Button(shape = MaterialTheme.shapes.medium,
                         onClick = onSelectFiles,
                         enabled = !uiState.isSubmitting,
                         modifier = Modifier.testTag("import_select_files"),
@@ -151,7 +164,7 @@ fun ImportScreen(
                         Text(if (uiState.batch == null) "选择 TXT 文件" else "继续选择文件")
                     }
                     TextButton(onClick = onSelectKnownEncoding, enabled = !uiState.isSubmitting) {
-                        Text("已知文件编码，直接指定")
+                        Text("手动选择编码")
                     }
                 }
             }
@@ -173,15 +186,37 @@ fun ImportScreen(
             uiState.batch?.let { batch ->
                 item {
                     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                        Text("本批次 ${batch.completedCount}/${batch.items.size}")
-                        LinearProgressIndicator(
-                            progress = { if (batch.items.isEmpty()) 0f else batch.completedCount.toFloat() / batch.items.size },
-                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        val batchComplete = batch.items.isNotEmpty() &&
+                            batch.completedCount >= batch.items.size
+                        Text(
+                            if (batchComplete) {
+                                "本批次已处理 ${batch.items.size} 本"
+                            } else {
+                                "导入进度 ${batch.completedCount}/${batch.items.size}"
+                            },
                         )
+                        if (!batchComplete) {
+                            LinearProgressIndicator(
+                                progress = {
+                                    if (batch.items.isEmpty()) {
+                                        0f
+                                    } else {
+                                        batch.completedCount.toFloat() / batch.items.size
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                            )
+                        }
                     }
                 }
                 items(batch.items, key = ImportItemState::workId) { item ->
-                    ImportItemCard(item, onResolveDuplicate, onRetry, onEditImportedBook)
+                    ImportItemCard(
+                        item = item,
+                        onOpenBook = onOpenBook,
+                        onResolveDuplicate = onResolveDuplicate,
+                        onRetry = onRetry,
+                        onEditImportedBook = onEditImportedBook,
+                    )
                 }
             }
             item { Column(Modifier.padding(bottom = 24.dp)) {} }
@@ -192,6 +227,7 @@ fun ImportScreen(
 @Composable
 private fun ImportItemCard(
     item: ImportItemState,
+    onOpenBook: (String) -> Unit,
     onResolveDuplicate: (ImportItemState, DuplicateResolution) -> Unit,
     onRetry: (ImportItemState) -> Unit,
     onEditImportedBook: (ImportItemState) -> Unit,
@@ -214,10 +250,25 @@ private fun ImportItemCard(
                 )
             }
             when (item.status) {
-                ImportItemStatus.SUCCEEDED -> TextButton(
-                    onClick = { onEditImportedBook(item) },
-                    modifier = Modifier.align(Alignment.End),
-                ) { Text("编辑书名和作者") }
+                ImportItemStatus.SUCCEEDED -> Row(
+                    modifier = Modifier
+                        .align(Alignment.End)
+                        .padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(onClick = { onEditImportedBook(item) }) {
+                        Text("编辑书名和作者")
+                    }
+                    item.bookId?.let { bookId ->
+                        Button(shape = MaterialTheme.shapes.medium,
+                            onClick = { onOpenBook(bookId) },
+                            modifier = Modifier.testTag("import_open_book_${item.workId}"),
+                        ) {
+                            Text("开始阅读")
+                        }
+                    }
+                }
                 ImportItemStatus.NEEDS_DECISION -> Column(modifier = Modifier.padding(top = 8.dp)) {
                     Text("已存在：${item.existingBookTitle.orEmpty()}")
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -261,10 +312,23 @@ private fun CharsetDialog(onSelect: (String?) -> Unit, onDismiss: () -> Unit) {
         title = { Text("文本编码") },
         text = {
             Column {
-                Text("仅在你确定原文件编码时使用。通常直接选择文件，让新阅自动检查。")
+                Text("仅在确定编码时使用；通常直接选择文件即可自动检查。")
                 options.forEach { (label, charset) ->
-                    TextButton(onClick = { onSelect(charset) }, modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .clickable { onSelect(charset) }
+                            .padding(horizontal = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         Text(label)
+                        Text(
+                            "选择",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
                     }
                 }
             }
@@ -296,12 +360,20 @@ private fun EncodingPreviewDialog(
             ) {
                 Text(analysis.explanation, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 analysis.candidates.forEach { candidate ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .clickable { selectedCharset = candidate.charsetName }
+                            .padding(horizontal = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(charsetLabel(candidate.charsetName))
                         RadioButton(
                             selected = candidate.charsetName == selectedCharset,
-                            onClick = { selectedCharset = candidate.charsetName },
+                            onClick = null,
                         )
-                        Text(charsetLabel(candidate.charsetName))
                     }
                 }
                 PreviewSection("开头", selectedCandidate.preview.beginning)
@@ -348,7 +420,7 @@ private fun ImportedBookMetadataDialog(
     var author by remember(book.id) { mutableStateOf(book.author.orEmpty()) }
     AlertDialog(
         onDismissRequest = { if (!isSaving) onDismiss() },
-        title = { Text("编辑导入结果") },
+        title = { Text("编辑书名和作者") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(

@@ -30,5 +30,5 @@ interface BookFileStore {
 
     suspend fun discard(staged: StagedBookFiles)
 
-    suspend fun remove(stored: StoredBookFiles)
+    suspend fun remove(stored: StoredBookFiles, preserveCover: Boolean = false, ownerBookId: String? = null)
 }

@@ -82,7 +82,7 @@ class BackupRestoreInstrumentedTest {
         val expected = runBlocking { BackupEquivalenceVerifier(context.filesDir).capture(gateway.snapshot()) }
 
         openBackupHome()
-        compose.onNodeWithText("开始导出").performClick()
+        compose.onNodeWithText("导出备份").performClick()
         compose.onNodeWithText("选择保存位置").performClick()
         val backupName = saveFromDocumentsUi()
         awaitApp()
@@ -96,7 +96,7 @@ class BackupRestoreInstrumentedTest {
         File(context.filesDir, "fonts").deleteRecursively()
 
         compose.onNodeWithText("返回备份与恢复").performClick()
-        compose.onNodeWithText("选择备份文件").performClick()
+        compose.onNodeWithText("从备份恢复").performClick()
         selectExportedDocumentFromDocumentsUi(backupName)
         awaitApp()
         compose.waitUntil(60_000) {
@@ -104,7 +104,7 @@ class BackupRestoreInstrumentedTest {
         }
         compose.onNodeWithText("覆盖整个书架").performClick()
         compose.onNodeWithTag("restore_confirm").performScrollTo().performClick()
-        compose.onNodeWithText("创建快照并覆盖").performClick()
+        compose.onNodeWithText("确认覆盖").performClick()
         compose.waitUntil(60_000) {
             compose.onAllNodesWithText("操作完成").fetchSemanticsNodes().isNotEmpty()
         }
@@ -123,9 +123,10 @@ class BackupRestoreInstrumentedTest {
         try {
             openBackupHome()
             compose.onNodeWithTag("backup_home_list").performScrollToIndex(3)
-            compose.onNodeWithText("选择导出格式").performClick()
+            compose.onNodeWithText("导出全部批注").performClick()
             compose.onNodeWithText("包含书签").performClick()
-            compose.onNodeWithText("导出 JSON").performClick()
+            compose.onNodeWithText("JSON").performClick()
+            compose.onNodeWithText("导出").performClick()
             exportName = saveFromDocumentsUi("xinyue-all-annotations.json")
             awaitApp()
             compose.waitUntil(60_000) {
@@ -172,7 +173,7 @@ class BackupRestoreInstrumentedTest {
             File(context.filesDir, "books").deleteRecursively()
             File(context.filesDir, "fonts").deleteRecursively()
 
-            compose.onNodeWithText("返回本地数据").performClick()
+            compose.onNodeWithText("返回备份与恢复").performClick()
             compose.onNodeWithTag("backup_home_list").performScrollToIndex(5)
             compose.onNodeWithText("选择 .xinyuehandoff").performClick()
             selectExportedDocumentFromDocumentsUi(requireNotNull(handoffName))
@@ -211,7 +212,7 @@ class BackupRestoreInstrumentedTest {
             assertTrue(File(context.filesDir, "restore-journals").listFiles().orEmpty().isEmpty())
             assertTrue(File(context.filesDir, "restore-snapshots").listFiles().orEmpty().isEmpty())
 
-            compose.onNodeWithText("返回本地数据").performClick()
+            compose.onNodeWithText("返回备份与恢复").performClick()
             device.pressBack()
             compose.waitUntil(10_000) {
                 compose.onAllNodesWithTag("nav_library", useUnmergedTree = true)

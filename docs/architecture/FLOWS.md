@@ -1,6 +1,6 @@
 # 新阅关键调用链
 
-> 状态：当前实现（基线 1.0.0）
+> 状态：当前实现（1.0.2 Debug，versionCode 10；未发布）
 > 用途：按任务定位跨模块调用，不替代源码、测试或接口 KDoc。  
 > 建议：只读取与当前任务相关的小节，再从链接进入真实代码。
 
@@ -19,6 +19,9 @@ ImportScreen / DocumentsUI
   → 内容哈希与重复书籍决策
   → BookFileStore.commit
   → BookRepository.addBook / replaceBook
+  → ImportScreen 展示成功结果（仅有效 bookId）
+  → MainActivity.ImportDestination 的 onOpenBook
+  → ReaderDestination(bookId)（ImportDestination 保留在返回栈）
 ```
 
 关键代码：
@@ -29,6 +32,7 @@ ImportScreen / DocumentsUI
 - Worker 执行与重试：[`ImportTxtWorker.kt`](../../core/data/src/main/kotlin/com/xinyue/reader/core/data/ImportTxtWorker.kt)。
 - 文件、数据库和重复处理协调：[`ImportBookUseCase.kt`](../../core/data/src/main/kotlin/com/xinyue/reader/core/data/ImportBookUseCase.kt)。
 - 私有文件暂存与发布：[`LocalBookFileStore.kt`](../../core/data/src/main/kotlin/com/xinyue/reader/core/data/LocalBookFileStore.kt)。
+- 成功结果与开始阅读入口：[`ImportScreen.kt`](../../feature/import/src/main/kotlin/com/xinyue/reader/feature/importing/ImportScreen.kt)、[`MainActivity.kt`](../../app/src/main/kotlin/com/xinyue/reader/MainActivity.kt)。
 
 必须保持的约束：
 
@@ -37,6 +41,7 @@ ImportScreen / DocumentsUI
 - 先暂存并计算内容哈希，再决定跳过、替换或保留副本。
 - 数据库写入失败时删除刚发布的私有文件；替换成功后才清理旧文件并尝试修复锚点。
 - 导入任务状态在数据库和 WorkManager 中可恢复，UI 不直接执行长时间文件复制。
+- 只有成功结果携带有效 `bookId` 时才提供“开始阅读”；开始阅读压入 `ReaderDestination(bookId)`，返回仍回到导入结果。失败、排队中、取消或待重复决策状态不提供阅读入口。
 
 代表性测试：[`ImportBookUseCaseTest.kt`](../../core/data/src/test/kotlin/com/xinyue/reader/core/data/ImportBookUseCaseTest.kt)、[`ImportTxtWorkerTest.kt`](../../core/data/src/test/kotlin/com/xinyue/reader/core/data/ImportTxtWorkerTest.kt)、[`ImportViewModelTest.kt`](../../feature/import/src/test/kotlin/com/xinyue/reader/feature/importing/ImportViewModelTest.kt)。
 
@@ -59,9 +64,18 @@ LibraryViewModel
   → 集合成员筛选或作者/系列聚合
   → 当前视图稳定排序
 
+书架搜索选择
+  → 搜索结果菜单“选择”或长按
+  → 关闭搜索、清空搜索状态并隐藏键盘
+  → LibraryViewModel.enterSelection(bookId)
+  → 返回书架列表显示选择栏
+
 StatisticsViewModel
   → ReadingSessionRepository.observeStatistics(day/week/month)
-  → 根统计（无返回）/ 单书统计（有返回）
+  → 根统计 / 单书统计
+  → 根统计选中书籍时顶部返回或系统返回清除单书筛选
+  → 单书目的地顶部返回返回书架
+  → 有会话但有效时长为零时显示明确空状态
 
 集合维护
   → BookGroupRepository
@@ -72,6 +86,7 @@ StatisticsViewModel
 - 根标签切换不增加导航栈；根级系统返回交给 Activity 退出。书架是默认根页，搜索时根导航临时隐藏。
 - `feature:home` 不再是运行入口；继续/最近阅读由书架的真实最近打开排序和“继续”卡片标记承接，聚合统计由统计根页承接。
 - 书架布局偏好是设备 UI 状态，不写 Room、不进入备份或接力；写入失败不能阻断书架或正文。
+- 书架书卡移除进度条并放大书封，优先保持书名和书籍识别；这属于界面展示，不改变阅读进度数据或数据库 schema。
 - 书架搜索只匹配书名、作者和系列，不调用正文 FTS，也不支持拼音或模糊匹配。
 - 一本书可加入多个集合；删除集合只解除成员关系。系列序号是书籍元数据，不由集合顺序替代。
 - 二级目的地只压入 `NavBackStack`，返回后由根壳恢复来源标签及其可保存 UI 状态。
@@ -94,11 +109,33 @@ MainActivity.ReaderDestination
   → ReaderUiState（raw content + layout content + title ranges + 连续页面）
   → ReaderPageSurface（显示 layout，选择/复制映射到 raw）
 
+全书页码跳转
+  → 用户显式打开页码跳转入口
+  → ReaderSession.prepareBookPageIndex
+  → ReaderBookPageIndex（TextSource 有界分块读取，保留前文上下文）
+  → ReaderLayoutWhitespaceNormalizer + 章节标题范围 + 章节硬分页边界
+  → ReaderUiState.bookPages / isIndexingBookPages / bookPageIndexProgress
+  → 索引生成前明确标注本章页码（窗口不完整时标注约值），生成后显示全书页码
+  → ReaderSession.jumpToBookPage（使用索引绝对页边界）
+  → 正式稳定进度 + ReaderNavigationController 返回跳转前原点
+
 阅读外观
   → ReaderQuickSettings（高频项）
   → 更多设置 / ReaderSettingsSheet（完整项）
   → 同一个 appearance edit 草稿
   → GLOBAL 或 CURRENT_BOOK 原子保存 / 取消回滚
+
+阅读工具与进度
+  → 顶部更多：目录管理 / 页码跳转 / 触摸锁
+  → 底部高频：目录、搜索、朗读、外观、笔记
+
+阅读自动化
+  → ReaderScreen 阅读菜单“更多”
+  → ReaderAutoPageController（10/15/20/30/60 秒，默认 20 秒）
+  → 正文触摸按下、手势、菜单、后台、离开阅读页、书末或翻页失败时暂停
+  → ReaderStopTimerController（15/30/60 分钟，单调时间）
+  → 后台继续计时；到期停止 TTS 与自动翻页，临时解除保持亮屏并提示进度不变
+  → 离开 Reader 组合时取消定时；重新进入后必须重新开启
 
 稳定翻页位置
   → ProgressWriteCoordinator（短延迟合并）
@@ -106,14 +143,32 @@ MainActivity.ReaderDestination
   → BookRepository.saveProgress
 ```
 
+目录、搜索与书签跳转
+```text
+目录选择
+  → ReaderSession.jumpToChapter
+  → ReaderNavigationController.commitChapterJump（成功后）
+  → navigateToOffset(commitProgress=true)
+  → 稳定续读位置 + 返回跳转前原点
+
+搜索结果 / 书签
+  → ReaderSession.jumpTemporarily(reason)
+  → 临时浏览
+  → “从这里继续”时提交稳定位置
+```
+
 关键代码：
 
 - 阅读会话总协调：[`ReaderViewModel.kt`](../../feature/reader/src/main/kotlin/com/xinyue/reader/feature/reader/ReaderViewModel.kt)。
+- 跳转模式与返回原点：[`ReaderNavigationController.kt`](../../feature/reader/src/main/kotlin/com/xinyue/reader/feature/reader/ReaderNavigationController.kt)。
 - 有界正文窗口：[`BookTextSource.kt`](../../core/data/src/main/kotlin/com/xinyue/reader/core/data/BookTextSource.kt) 与 [`LocalBookTextSource.kt`](../../core/data/src/main/kotlin/com/xinyue/reader/core/data/LocalBookTextSource.kt)。
 - UI 尺寸驱动分页：[`AndroidTextPaginator.kt`](../../feature/reader/src/main/kotlin/com/xinyue/reader/feature/reader/AndroidTextPaginator.kt)。
+- 全书页码索引与按页跳转：[`ReaderBookPageIndex.kt`](../../feature/reader/src/main/kotlin/com/xinyue/reader/feature/reader/ReaderBookPageIndex.kt) 与 [`ReaderViewModel.kt`](../../feature/reader/src/main/kotlin/com/xinyue/reader/feature/reader/ReaderViewModel.kt)。
+- 分页与显示布局策略：[`ReaderTextLayoutPolicy.kt`](../../feature/reader/src/main/kotlin/com/xinyue/reader/feature/reader/ReaderTextLayoutPolicy.kt)。
 - 标题与正文共享样式：[`ReaderStyledTextFactory.kt`](../../feature/reader/src/main/kotlin/com/xinyue/reader/feature/reader/ReaderStyledTextFactory.kt)。
 - 原文/排版双文本渲染与选择：[`ReaderPageSurface.kt`](../../feature/reader/src/main/kotlin/com/xinyue/reader/feature/reader/ReaderPageSurface.kt)。
 - 高频外观入口：[`ReaderQuickSettings.kt`](../../feature/reader/src/main/kotlin/com/xinyue/reader/feature/reader/ReaderQuickSettings.kt)。
+- 自动翻页与定时停止控制器：[`ReaderAutomationControllers.kt`](../../feature/reader/src/main/kotlin/com/xinyue/reader/feature/reader/ReaderAutomationControllers.kt)，阅读页接线位于 [`ReaderScreen.kt`](../../feature/reader/src/main/kotlin/com/xinyue/reader/feature/reader/ReaderScreen.kt)。
 - TXT 空白排版副本：[`ReaderLayoutWhitespaceNormalizer.kt`](../../core/text/src/main/kotlin/com/xinyue/reader/core/text/ReaderLayoutWhitespaceNormalizer.kt)。
 - 进度写入合并：[`ProgressWriteCoordinator.kt`](../../feature/reader/src/main/kotlin/com/xinyue/reader/feature/reader/ProgressWriteCoordinator.kt)。
 - 上下文指纹：[`TextFingerprint.kt`](../../core/text/src/main/kotlin/com/xinyue/reader/core/text/TextFingerprint.kt)。
@@ -125,13 +180,19 @@ MainActivity.ReaderDestination
 - 正文打开优先；设置、锚点修复、章节、统计等附属能力失败不得阻断可读正文。
 - 持久进度使用 UTF-16 偏移和上下文指纹，不只保存页面序号。
 - 排版副本与正文窗口 UTF-16 长度相同，只替换布局空白；分页/显示使用副本，选择/复制、搜索、朗读、标注和持久进度仍使用原文。
+- 分页与显示共用 `ReaderTextLayoutPolicy`；排版副本长度不一致时显示回退到原文，页面末端发布前按实际渲染片段重新测量并裁掉超出末行。
 - 真实章节标题范围参与分页和渲染的同一测量；章节边界前不可见空白并入相邻可见页，页面必须连续且不能跨越章节起点。
 - 标题页不重复显示运行标题；续页是否显示运行标题只由真实标题范围和页面起点判断。
-- 快速设置与完整设置共享同一草稿和稳定锚点；只有显式保存写入选定作用域，取消或保存失败不得污染其他书或更新的编辑会话。
-- 临时跳转不会立即覆盖稳定阅读位置；用户选择继续阅读后才提交新位置。
+- 快速设置集中作用域、字号、五种主题、全局亮度和“更多设置”；行距、段距、缩进、翻页、字体等低频能力保留在完整设置中。两级设置共享同一草稿和稳定锚点；只有显式保存写入选定作用域，取消或保存失败不得污染其他书或更新的编辑会话。
+- 阅读工具菜单按顶部导航/更多操作和底部高频操作分组；阅读位置通过目录选章或页码跳转处理，不再使用阅读进度滑杆。全书页码只在用户显式打开页码入口时按当前版式异步生成；索引未完成时明确标注本章页码（窗口不完整时标注约值），完成后才显示全书页码。取消、失败或离开不改变正文和稳定进度，成功的正式跳页提交稳定进度并保留“返回跳转前”的正式原点。
+- 全书页码索引使用有界正文窗口、同一排版空白归一化、标题测量和章节硬边界，输出绝对 UTF-16 页边界；字体、版式或章节变化会使索引失效并重新生成。章节 generation 变化时，未完成的正文窗口跳转也必须取消并清理加载状态；过期请求不得覆盖原正文窗口、当前页或稳定进度，也不得把取消报告为正文读取失败。数据库 schema 和备份格式不变。
+- 成功的目录选择通过 `jumpToChapter` 成为稳定续读位置并保留菜单“返回跳转前”；搜索和书签仍是临时跳转，只有用户选择“从这里继续”才提交新位置。
+- 自动翻页只允许 10/15/20/30/60 秒间隔，默认 20 秒；每次翻页必须等待上一页完成，不并发、不追赶错过的间隔。正文触摸按下、手势、打开菜单、进入后台、离开阅读页、到达书末或翻页失败时暂停。
+- 朗读与自动翻页互斥；朗读错误恢复 UI 状态并提示原因，完成/错误回调在主线程按 utterance ID 核对，停止或替换后的旧回调丢弃。
+- 定时停止只允许 15/30/60 分钟，使用单调时间计时；进入后台后仍继续计时，到期停止 TTS 和自动翻页、临时解除本次阅读的保持亮屏并提示当前进度不变。定时不写入持久设置；离开阅读页会取消定时，恢复计时必须重新开启。
 - 离开阅读器前显式刷新待保存进度并关闭统计会话；保存失败时保留页面并提示重试。
 
-代表性测试：[`ReaderViewModelTest.kt`](../../feature/reader/src/test/kotlin/com/xinyue/reader/feature/reader/ReaderViewModelTest.kt)、[`ProgressWriteCoordinatorTest.kt`](../../feature/reader/src/test/kotlin/com/xinyue/reader/feature/reader/ProgressWriteCoordinatorTest.kt)、[`ReaderProcessRecoveryTest.kt`](../../app/src/androidTest/kotlin/com/xinyue/reader/ReaderProcessRecoveryTest.kt)。
+代表性测试：[`ReaderViewModelTest.kt`](../../feature/reader/src/test/kotlin/com/xinyue/reader/feature/reader/ReaderViewModelTest.kt)、[`ProgressWriteCoordinatorTest.kt`](../../feature/reader/src/test/kotlin/com/xinyue/reader/feature/reader/ProgressWriteCoordinatorTest.kt)、[`ReaderAutomationControllersTest.kt`](../../feature/reader/src/test/kotlin/com/xinyue/reader/feature/reader/ReaderAutomationControllersTest.kt)、[`ReaderProcessRecoveryTest.kt`](../../app/src/androidTest/kotlin/com/xinyue/reader/ReaderProcessRecoveryTest.kt)。
 
 ## 3. 章节、搜索、书签、标注与导出
 
@@ -148,7 +209,12 @@ ReaderViewModel
   → TextSource 分窗读取 + SearchChunker
   → SearchIndexDao / FTS5
   → BookSearchRepository.search
-  → ReaderViewModel 跳转到 UTF-16 偏移
+  → ReaderSession.jumpTemporarily(SEARCH)
+  → ReaderNavigationController 临时浏览 UTF-16 偏移
+
+目录 / 书签
+  → ReaderSession.jumpToChapter（目录成功：提交稳定续读位置）
+  → ReaderSession.jumpTemporarily(BOOKMARK)（书签：临时浏览）
 
 当前书笔记 / 本地数据
   → AnnotationExportService
@@ -170,6 +236,7 @@ ReaderViewModel
 - 搜索索引按内容哈希和 generation 管理；新 generation 完成后才切换为 active。
 - 索引失败或取消不能破坏上一份可用 generation。
 - 搜索和章节位置都使用正文 UTF-16 偏移，以便与进度、书签和标注互操作。
+- 目录调用 `jumpToChapter` 并提交正式续读位置；搜索和书签调用临时跳转，返回原点或后退不改稳定进度，选择“从这里继续”才提交。
 - 自动章节重建不能静默覆盖用户手工编辑的章节。
 - 批注导出按书籍、章节和 UTF-16 位置稳定排序；普通书签默认排除，显式开启后才加入。
 - 导出正文片段必须有界读取；导出结果或错误日志不得包含外部 URI。
@@ -201,6 +268,8 @@ BackupViewModel
   → XinYueApplication
   → RestoreRecovery.reconcile
 ```
+
+当前备份页入口位于设置首页的“备份与恢复”，界面按“整个书架”和“笔记与单书”列出导出备份、从备份恢复、全部批注导出、单书接力包导出和接收接力包；这些只是入口分组，仍复用下方的任务、预览令牌和恢复发布链路。
 
 关键代码：
 

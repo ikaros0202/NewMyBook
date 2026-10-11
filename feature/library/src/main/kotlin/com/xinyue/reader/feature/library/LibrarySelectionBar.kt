@@ -20,6 +20,13 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
 import com.xinyue.reader.core.domain.model.BookGroup
 
+private enum class CollectionMenuMode {
+    ROOT,
+    MOVE,
+    ADD,
+    REMOVE,
+}
+
 @Composable
 internal fun LibrarySelectionBar(
     selectedCount: Int,
@@ -34,9 +41,8 @@ internal fun LibrarySelectionBar(
     onDelete: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    var moveMenuExpanded by remember { mutableStateOf(false) }
-    var addMenuExpanded by remember { mutableStateOf(false) }
-    var removeMenuExpanded by remember { mutableStateOf(false) }
+    var collectionMenuMode by remember { mutableStateOf<CollectionMenuMode?>(null) }
+    var statusMenuExpanded by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .semantics { stateDescription = "已选择 $selectedCount 本书" }
@@ -45,75 +51,127 @@ internal fun LibrarySelectionBar(
         Text("已选择 $selectedCount 本", style = MaterialTheme.typography.titleMedium)
         Row(modifier = Modifier.horizontalScroll(rememberScrollState())) {
             TextButton(onClick = onSelectAll, enabled = !actionInProgress) { Text("全选当前结果") }
-            TextButton(onClick = { moveMenuExpanded = true }, enabled = !actionInProgress) { Text("移动到") }
+            TextButton(
+                onClick = { collectionMenuMode = CollectionMenuMode.ROOT },
+                enabled = !actionInProgress,
+            ) { Text("集合") }
             DropdownMenu(
-                expanded = moveMenuExpanded,
-                onDismissRequest = { moveMenuExpanded = false },
+                expanded = collectionMenuMode != null,
+                onDismissRequest = { collectionMenuMode = null },
+            ) {
+                when (collectionMenuMode) {
+                    CollectionMenuMode.ROOT -> {
+                        DropdownMenuItem(
+                            text = { Text("移动到") },
+                            onClick = { collectionMenuMode = CollectionMenuMode.MOVE },
+                        )
+                        if (onAddToCollection != null) {
+                            DropdownMenuItem(
+                                text = { Text("加入集合") },
+                                enabled = groups.isNotEmpty(),
+                                onClick = { collectionMenuMode = CollectionMenuMode.ADD },
+                            )
+                        }
+                        if (onRemoveFromCollection != null) {
+                            DropdownMenuItem(
+                                text = { Text("移出集合") },
+                                enabled = groups.isNotEmpty(),
+                                onClick = { collectionMenuMode = CollectionMenuMode.REMOVE },
+                            )
+                        }
+                        if (onClearCollections != null) {
+                            DropdownMenuItem(
+                                text = { Text("清空集合") },
+                                onClick = {
+                                    collectionMenuMode = null
+                                    onClearCollections()
+                                },
+                            )
+                        }
+                    }
+                    CollectionMenuMode.MOVE -> {
+                        DropdownMenuItem(
+                            text = { Text("返回集合操作") },
+                            onClick = { collectionMenuMode = CollectionMenuMode.ROOT },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("未加入集合") },
+                            onClick = {
+                                collectionMenuMode = null
+                                onMove(null)
+                            },
+                        )
+                        groups.forEach { group ->
+                            DropdownMenuItem(
+                                text = { Text(group.name) },
+                                onClick = {
+                                    collectionMenuMode = null
+                                    onMove(group.id)
+                                },
+                            )
+                        }
+                    }
+                    CollectionMenuMode.ADD -> {
+                        DropdownMenuItem(
+                            text = { Text("返回集合操作") },
+                            onClick = { collectionMenuMode = CollectionMenuMode.ROOT },
+                        )
+                        onAddToCollection?.let { addToCollection ->
+                            groups.forEach { group ->
+                                DropdownMenuItem(
+                                    text = { Text(group.name) },
+                                    onClick = {
+                                        collectionMenuMode = null
+                                        addToCollection(group.id)
+                                    },
+                                )
+                            }
+                        }
+                    }
+                    CollectionMenuMode.REMOVE -> {
+                        DropdownMenuItem(
+                            text = { Text("返回集合操作") },
+                            onClick = { collectionMenuMode = CollectionMenuMode.ROOT },
+                        )
+                        onRemoveFromCollection?.let { removeFromCollection ->
+                            groups.forEach { group ->
+                                DropdownMenuItem(
+                                    text = { Text(group.name) },
+                                    onClick = {
+                                        collectionMenuMode = null
+                                        removeFromCollection(group.id)
+                                    },
+                                )
+                            }
+                        }
+                    }
+                    null -> Unit
+                }
+            }
+
+            TextButton(
+                onClick = { statusMenuExpanded = true },
+                enabled = !actionInProgress,
+            ) { Text("状态") }
+            DropdownMenu(
+                expanded = statusMenuExpanded,
+                onDismissRequest = { statusMenuExpanded = false },
             ) {
                 DropdownMenuItem(
-                    text = { Text("未加入集合") },
+                    text = { Text("标记已读完") },
                     onClick = {
-                        moveMenuExpanded = false
-                        onMove(null)
+                        statusMenuExpanded = false
+                        onMarkFinished(true)
                     },
                 )
-                groups.forEach { group ->
-                    DropdownMenuItem(
-                        text = { Text(group.name) },
-                        onClick = {
-                            moveMenuExpanded = false
-                            onMove(group.id)
-                        },
-                    )
-                }
+                DropdownMenuItem(
+                    text = { Text("取消已读完") },
+                    onClick = {
+                        statusMenuExpanded = false
+                        onMarkFinished(false)
+                    },
+                )
             }
-            if (onAddToCollection != null) {
-                TextButton(
-                    onClick = { addMenuExpanded = true },
-                    enabled = !actionInProgress && groups.isNotEmpty(),
-                ) { Text("加入集合") }
-                DropdownMenu(
-                    expanded = addMenuExpanded,
-                    onDismissRequest = { addMenuExpanded = false },
-                ) {
-                    groups.forEach { group ->
-                        DropdownMenuItem(
-                            text = { Text(group.name) },
-                            onClick = {
-                                addMenuExpanded = false
-                                onAddToCollection(group.id)
-                            },
-                        )
-                    }
-                }
-            }
-            if (onRemoveFromCollection != null) {
-                TextButton(
-                    onClick = { removeMenuExpanded = true },
-                    enabled = !actionInProgress && groups.isNotEmpty(),
-                ) { Text("移出集合") }
-                DropdownMenu(
-                    expanded = removeMenuExpanded,
-                    onDismissRequest = { removeMenuExpanded = false },
-                ) {
-                    groups.forEach { group ->
-                        DropdownMenuItem(
-                            text = { Text(group.name) },
-                            onClick = {
-                                removeMenuExpanded = false
-                                onRemoveFromCollection(group.id)
-                            },
-                        )
-                    }
-                }
-            }
-            if (onClearCollections != null) {
-                TextButton(onClick = onClearCollections, enabled = !actionInProgress) {
-                    Text("清空集合")
-                }
-            }
-            TextButton(onClick = { onMarkFinished(true) }, enabled = !actionInProgress) { Text("标记已读完") }
-            TextButton(onClick = { onMarkFinished(false) }, enabled = !actionInProgress) { Text("取消已读完") }
             TextButton(onClick = onDelete, enabled = !actionInProgress) { Text("删除") }
             TextButton(onClick = onCancel, enabled = !actionInProgress) { Text("取消选择") }
         }

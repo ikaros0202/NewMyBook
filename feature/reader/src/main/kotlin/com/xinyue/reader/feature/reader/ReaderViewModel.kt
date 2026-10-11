@@ -43,6 +43,7 @@ import com.xinyue.reader.core.domain.repository.ImportedFontRepository
 import com.xinyue.reader.core.domain.repository.ReadingSessionRepository
 import com.xinyue.reader.core.domain.time.EpochClock
 import com.xinyue.reader.core.text.ChapterDetector
+import com.xinyue.reader.core.text.ChapterStreamScanner
 import com.xinyue.reader.core.text.ReaderLayoutWhitespaceNormalizer
 import com.xinyue.reader.core.text.ChapterRuleSet
 import com.xinyue.reader.core.text.CharacterPaginator
@@ -86,11 +87,18 @@ data class ReaderUiState(
     val contentLength: Long = 0,
     val pages: List<ReaderPage> = emptyList(),
     val currentPageIndex: Int = 0,
+    /** Complete absolute page table, built only after the user explicitly opens page jumping. */
+    val bookPages: List<ReaderPage>? = null,
+    val isIndexingBookPages: Boolean = false,
+    val bookPageIndexProgress: Float = 0f,
+    val bookPageIndexError: String? = null,
     val anchorOffset: Int = 0,
     /** Last position allowed to persist as reading progress. */
     val stableAnchorOffset: Int = 0,
     val isBrowsingTemporarily: Boolean = false,
     val canNavigateBack: Boolean = false,
+    /** A committed directory jump still has a one-tap return point. */
+    val canReturnToOrigin: Boolean = false,
     val progressPreview: ReaderPositionPreview? = null,
     val isProgressPreviewLoading: Boolean = false,
     val isPaginating: Boolean = false,
@@ -101,6 +109,7 @@ data class ReaderUiState(
     val chaptersManuallyEdited: Boolean = false,
     val isAnalyzingChapters: Boolean = false,
     val searchResults: List<ReaderSearchResult> = emptyList(),
+    val searchErrorMessage: String? = null,
     val isSearching: Boolean = false,
     val searchIndexState: BookSearchIndexState? = null,
     val settings: ReaderSettings = ReaderSettings(),
@@ -117,6 +126,8 @@ data class ReaderUiState(
     val isAnnotationExporting: Boolean = false,
     val annotationExportMessage: String? = null,
     val isLoading: Boolean = false,
+    /** Non-blocking navigation read or re-pagination failure while previous pages remain usable. */
+    val navigationErrorMessage: String? = null,
     val errorMessage: String? = null,
 )
 
@@ -145,6 +156,17 @@ data class ReaderSearchResult(
     val highlightEnd: Int = 0,
 )
 
+private data class ReaderBookPageIndexKey(
+    val bookId: String,
+    val normalizedPath: String,
+    val totalUtf16Length: Long,
+    val spec: ReaderLayoutSpec,
+    val chapters: List<DetectedChapter>,
+    val chaptersManuallyEdited: Boolean,
+    val generation: Long,
+    val chapterGeneration: Long,
+)
+
 interface ReaderSession {
     val uiState: StateFlow<ReaderUiState>
 
@@ -154,6 +176,16 @@ interface ReaderSession {
     fun recordUserInteraction()
     fun goToPage(index: Int)
     fun jumpToOffset(offset: Int)
+    /** Starts the bounded, exact full-book page index on explicit page-jump entry. */
+    fun prepareBookPageIndex() = Unit
+    fun cancelBookPageIndex() = Unit
+    /** Uses the completed full-book table; page numbers are one-based. */
+    fun jumpToBookPage(pageNumber1based: Int) = Unit
+    /**
+     * Commits a successful directory selection while retaining a return point to the prior
+     * formal stable anchor. A temporary search or bookmark position is never promoted by return.
+     */
+    fun jumpToChapter(offset: Int)
     fun jumpTemporarily(offset: Int, reason: ReaderJumpReason)
     fun navigateBack()
     fun returnToOrigin()
@@ -240,7 +272,10 @@ class ReaderViewModel @Inject constructor(
 
     override fun onReaderForeground(bookId: String) = readingSessionTracker.onReaderForeground(bookId)
 
-    override fun onReaderBackground() = readingSessionTracker.onReaderBackground()
+    override fun onReaderBackground() {
+        cancelBookPageIndex()
+        readingSessionTracker.onReaderBackground()
+    }
 
     override fun recordUserInteraction() = readingSessionTracker.onInteraction()
 
@@ -265,6 +300,11 @@ class ReaderViewModel @Inject constructor(
     private var paginationJob: Job? = null
     private var layoutContentJob: Job? = null
     private var windowJob: Job? = null
+    private var bookPageIndexJob: Job? = null
+    private var bookPageIndexRequestId: Long = 0L
+    private var bookPageIndexGeneration: Long = 0L
+    private var bookPageIndexKey: ReaderBookPageIndexKey? = null
+    private var windowRequestOriginOffset: Int? = null
     private var chapterJob: Job? = null
     private var searchJob: Job? = null
     private var searchIndexJob: Job? = null
@@ -274,6 +314,7 @@ class ReaderViewModel @Inject constructor(
     private var progressPreviewRequestId: Long = 0
     private var progressPreviewTargetOffset: Int? = null
     private var currentBookmarks: List<Bookmark> = emptyList()
+    private var currentBookOverrides = ReaderSettingsOverrides()
     private var pendingRestoreOffset: Int? = null
     private var currentAnchorOffset: Int = 0
     private var stableAnchorOffset: Int = 0
@@ -319,13 +360,17 @@ class ReaderViewModel @Inject constructor(
 
     override fun open(bookId: String, pageUtf16Units: Int) {
         require(pageUtf16Units > 0) { "每页字符数必须大于零" }
-        if (mutableUiState.value.book?.id == bookId && loadedWindow?.text?.isNotEmpty() == true) return
+        if (mutableUiState.value.book?.id == bookId && loadedWindow?.text?.isNotEmpty() == true) {
+            if (!themeScheduleController.isRunning) themeScheduleController.start(viewModelScope, ::applyScheduledTheme)
+            return
+        }
 
         val requestGeneration = ++openGeneration
         activeOpenBookId = bookId
         openJob?.cancel()
         openJob = viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
             cancelBookWork()
+            currentBookOverrides = ReaderSettingsOverrides()
             coarsePageUtf16Units = pageUtf16Units
             val retainedUi = mutableUiState.value
             loadedWindow = null
@@ -334,6 +379,7 @@ class ReaderViewModel @Inject constructor(
             stableAnchorOffset = 0
             navigationController.clear()
             pendingRestoreOffset = null
+            windowRequestOriginOffset = null
             mutableUiState.value = ReaderUiState(
                 isLoading = true,
                 settings = currentSettings,
@@ -437,7 +483,7 @@ class ReaderViewModel @Inject constructor(
                     activeThemeId = themeManager.activeThemeId(currentSettings, supplementalUi.themes),
                     themeSchedule = supplementalUi.themeSchedule,
                     manualThemeOverride = supplementalUi.manualThemeOverride,
-                    bookAppearanceOverrides = supplementalUi.bookAppearanceOverrides,
+                    bookAppearanceOverrides = currentBookOverrides,
                     bookmarks = currentBookmarks,
                 )
                 if (!isCurrentOpenRequest(book.id, requestGeneration)) return@launch
@@ -535,11 +581,31 @@ class ReaderViewModel @Inject constructor(
         paginationJob?.cancel()
         layoutContentJob?.cancel()
         windowJob?.cancel()
+        invalidateBookPageIndex()
         chapterJob?.cancel()
         searchJob?.cancel()
         searchIndexJob?.cancel()
         bookmarkJob?.cancel()
         annotationJob?.cancel()
+    }
+
+    /** Invalidates only the derived full-book page table; the visible window remains intact. */
+    private fun invalidateBookPageIndex() {
+        bookPageIndexGeneration += 1
+        bookPageIndexRequestId += 1
+        bookPageIndexJob?.cancel()
+        bookPageIndexJob = null
+        bookPageIndexKey = null
+        if (mutableUiState.value.bookPages != null || mutableUiState.value.isIndexingBookPages) {
+            mutableUiState.update {
+                it.copy(
+                    bookPages = null,
+                    isIndexingBookPages = false,
+                    bookPageIndexProgress = 0f,
+                    bookPageIndexError = null,
+                )
+            }
+        }
     }
 
     private fun isCurrentOpenRequest(bookId: String, generation: Long): Boolean =
@@ -575,7 +641,12 @@ class ReaderViewModel @Inject constructor(
 
     private fun beginChapterAnalysis(): Long {
         chapterJob?.cancel()
+        // Chapter analysis invalidates the full-book page index. If a page jump is still
+        // loading, abort that request as well so it cannot keep the reader in a pending state
+        // after its index key becomes stale.
+        cancelWindowForNavigation()
         chapterMutationGeneration += 1
+        invalidateBookPageIndex()
         return chapterMutationGeneration
     }
 
@@ -622,6 +693,7 @@ class ReaderViewModel @Inject constructor(
     private fun observeBookOverrides(bookId: String?, requestGeneration: Long? = null) {
         bookOverridesJob?.cancel()
         if (bookId == null) {
+            currentBookOverrides = ReaderSettingsOverrides()
             mutableUiState.update { it.copy(bookAppearanceOverrides = ReaderSettingsOverrides()) }
             return
         }
@@ -636,6 +708,7 @@ class ReaderViewModel @Inject constructor(
         bookOverridesJob = viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
             settingsRepository.observeBookOverrides(bookId).collectLatest { overrides ->
                 if (!isCurrentBoundBook()) return@collectLatest
+                currentBookOverrides = overrides
                 mutableUiState.update { state ->
                     if (state.book?.id == bookId) state.copy(bookAppearanceOverrides = overrides) else state
                 }
@@ -776,22 +849,23 @@ class ReaderViewModel @Inject constructor(
         chapterJob = viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
             try {
                 val chaptersByOffset = sortedMapOf<Int, DetectedChapter>()
+                val scanner = ChapterStreamScanner(ruleSet)
                 var cursor = 0L
                 while (cursor < totalLength) {
                     val window = textSource.readWindow(
                         normalizedPath = book.normalizedPath,
                         anchorOffset = cursor,
-                        beforeUtf16Units = if (cursor == 0L) 0 else CHAPTER_SCAN_OVERLAP,
+                        beforeUtf16Units = 0,
                         afterUtf16Units = CHAPTER_SCAN_CHUNK,
                     )
                     val detected = withContext(computationDispatcher) {
-                        ChapterDetector.detect(window.text, ruleSet)
+                        scanner.accept(window.startOffset, window.text, window.endOffset >= totalLength)
                     }
                     detected.forEach { chapter ->
                         val isFallback = detected.size == 1 &&
                             chapter.title == "正文" && chapter.startOffset == 0
                         if (!isFallback) {
-                            val absoluteOffset = window.startOffset + chapter.startOffset
+                            val absoluteOffset = chapter.startOffset.toLong()
                             if (absoluteOffset <= Int.MAX_VALUE) {
                                 chaptersByOffset.putIfAbsent(
                                     absoluteOffset.toInt(),
@@ -819,6 +893,7 @@ class ReaderViewModel @Inject constructor(
                         }
                     }
                     if (accepted && isCurrentChapterAnalysis(book.id, analysisGeneration)) {
+                        invalidateBookPageIndex()
                         mutableUiState.update { state ->
                             if (state.book?.id == book.id &&
                                 chapterMutationGeneration == analysisGeneration
@@ -918,6 +993,7 @@ class ReaderViewModel @Inject constructor(
         val edited = edit(previous).sortedBy(DetectedChapter::startOffset)
         if (edited == previous) return
         chapterJob?.cancel()
+        invalidateBookPageIndex()
         val editGeneration = ++chapterMutationGeneration
         mutableUiState.update {
             it.copy(
@@ -1039,11 +1115,18 @@ class ReaderViewModel @Inject constructor(
             }
             return
         }
+        invalidateBookPageIndex()
         currentLayoutSpec = spec
         if (loadedWindow != null) requestRepagination(spec, pendingRestoreOffset)
     }
 
-    private fun requestRepagination(spec: ReaderLayoutSpec, requestedAnchorOffset: Int? = null) {
+    private fun requestRepagination(
+        spec: ReaderLayoutSpec,
+        requestedAnchorOffset: Int? = null,
+        onSuccess: (() -> Unit)? = null,
+        isNavigationRequest: Boolean = false,
+        restorePendingOffsetOnFailure: Int? = null,
+    ) {
         val window = loadedWindow ?: return
         val chapterState = mutableUiState.value
         val chapters = chapterState.chapters
@@ -1060,13 +1143,14 @@ class ReaderViewModel @Inject constructor(
                 val preparedLayout = withContext(computationDispatcher) {
                     prepareLayout(window, chapters, chaptersManuallyEdited)
                 }
-                val pages = paginatePrecisely(
-                    window = window,
-                    spec = spec,
-                    layoutText = preparedLayout.text,
-                    chapters = chapters,
-                    titleRanges = preparedLayout.titleRanges,
-                )
+                val pages = indexedPagesForWindow(window, targetPage = null)
+                    ?: paginatePrecisely(
+                        window = window,
+                        spec = spec,
+                        layoutText = preparedLayout.text,
+                        chapters = chapters,
+                        titleRanges = preparedLayout.titleRanges,
+                    )
                 if (!isCurrentLayoutSnapshot(
                         generation = generation,
                         bookId = bookId,
@@ -1089,6 +1173,7 @@ class ReaderViewModel @Inject constructor(
                         isPaginating = false,
                     )
                 }
+                onSuccess?.invoke()
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {
@@ -1101,8 +1186,16 @@ class ReaderViewModel @Inject constructor(
                         spec = spec,
                     )
                 ) {
+                    if (isNavigationRequest) pendingRestoreOffset = restorePendingOffsetOnFailure
                     mutableUiState.update {
-                        it.copy(isPaginating = false, errorMessage = "重新排版失败")
+                        if (isNavigationRequest) {
+                            it.copy(
+                                isPaginating = false,
+                                navigationErrorMessage = "重新排版失败",
+                            )
+                        } else {
+                            it.copy(isPaginating = false, errorMessage = "重新排版失败")
+                        }
                     }
                 }
             }
@@ -1157,15 +1250,13 @@ class ReaderViewModel @Inject constructor(
         val normalizedQuery = query.trim()
         searchJob?.cancel()
         if (normalizedQuery.codePointCount(0, normalizedQuery.length) < 2) {
-            mutableUiState.update { it.copy(searchResults = emptyList(), isSearching = false) }
-            if (normalizedQuery.isNotEmpty()) {
-                mutableUiState.update { it.copy(errorMessage = "请至少输入两个字符") }
-            }
+            mutableUiState.update { it.copy(searchResults = emptyList(), isSearching = false,
+                searchErrorMessage = "请至少输入两个字符".takeIf { normalizedQuery.isNotEmpty() }) }
             return
         }
         val state = mutableUiState.value
         val book = state.book ?: return
-        mutableUiState.update { it.copy(isSearching = true, errorMessage = null) }
+        mutableUiState.update { it.copy(isSearching = true, searchErrorMessage = null) }
         searchJob = viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
             try {
                 val results = bookSearchRepository.search(book.id, normalizedQuery, MAX_SEARCH_RESULTS)
@@ -1181,7 +1272,7 @@ class ReaderViewModel @Inject constructor(
                 throw error
             } catch (error: Throwable) {
                 mutableUiState.update {
-                    it.copy(isSearching = false, errorMessage = "搜索失败")
+                    it.copy(isSearching = false, searchErrorMessage = "搜索失败")
                 }
             }
         }
@@ -1206,29 +1297,193 @@ class ReaderViewModel @Inject constructor(
         jumpTemporarily(offset, ReaderJumpReason.PROGRESS)
     }
 
-    override fun jumpTemporarily(offset: Int, reason: ReaderJumpReason) {
+    override fun prepareBookPageIndex() {
+        val state = mutableUiState.value
+        val book = state.book ?: return
+        val spec = currentLayoutSpec
+        if (spec == null) {
+            mutableUiState.update {
+                it.copy(
+                    bookPageIndexError = "阅读版式尚未准备好",
+                    isIndexingBookPages = false,
+                )
+            }
+            return
+        }
+        val key = ReaderBookPageIndexKey(
+            bookId = book.id,
+            normalizedPath = book.normalizedPath,
+            totalUtf16Length = state.contentLength,
+            spec = spec,
+            chapters = state.chapters,
+            chaptersManuallyEdited = state.chaptersManuallyEdited,
+            generation = bookPageIndexGeneration,
+            chapterGeneration = chapterMutationGeneration,
+        )
+        if (state.bookPages != null && bookPageIndexKey == key) return
+        if (state.isIndexingBookPages && bookPageIndexKey == key) return
+
+        bookPageIndexJob?.cancel()
+        val requestId = ++bookPageIndexRequestId
+        bookPageIndexKey = key
+        mutableUiState.update {
+            it.copy(
+                bookPages = null,
+                isIndexingBookPages = true,
+                bookPageIndexProgress = 0f,
+                bookPageIndexError = null,
+            )
+        }
+        bookPageIndexJob = viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                val pages = buildReaderBookPageIndex(
+                    textSource = textSource,
+                    paginator = paginator,
+                    normalizedPath = book.normalizedPath,
+                    totalUtf16Length = state.contentLength,
+                    spec = spec,
+                    chapters = state.chapters,
+                    chaptersManuallyEdited = state.chaptersManuallyEdited,
+                    computationDispatcher = computationDispatcher,
+                ) { progress ->
+                    if (requestId == bookPageIndexRequestId && bookPageIndexKey == key) {
+                        mutableUiState.update { current ->
+                            if (current.book?.id == book.id && current.isIndexingBookPages) {
+                                current.copy(bookPageIndexProgress = progress)
+                            } else {
+                                current
+                            }
+                        }
+                    }
+                }
+                if (requestId != bookPageIndexRequestId || bookPageIndexKey != key) return@launch
+                mutableUiState.update { current ->
+                    if (current.book?.id != book.id) {
+                        current
+                    } else {
+                        current.copy(
+                            bookPages = pages,
+                            isIndexingBookPages = false,
+                            bookPageIndexProgress = 1f,
+                            bookPageIndexError = null,
+                        )
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                if (requestId == bookPageIndexRequestId && bookPageIndexKey == key) {
+                    mutableUiState.update { current ->
+                        if (current.book?.id == book.id) {
+                            current.copy(
+                                bookPages = null,
+                                isIndexingBookPages = false,
+                                bookPageIndexProgress = 0f,
+                                bookPageIndexError = "生成全书页码失败",
+                            )
+                        } else {
+                            current
+                        }
+                    }
+                }
+            } finally {
+                if (requestId == bookPageIndexRequestId && bookPageIndexKey == key) {
+                    bookPageIndexJob = null
+                }
+            }
+        }
+    }
+
+    override fun cancelBookPageIndex() {
+        if (!mutableUiState.value.isIndexingBookPages) {
+            bookPageIndexJob?.cancel()
+            bookPageIndexJob = null
+            return
+        }
+        invalidateBookPageIndex()
+    }
+
+    override fun jumpToBookPage(pageNumber1based: Int) {
+        val state = mutableUiState.value
+        if (state.book == null) return
+        val page = state.bookPages
+            ?.takeIf { bookPageIndexKey == currentBookPageIndexKey(state) }
+            ?.getOrNull(pageNumber1based - 1)
+        if (page == null) {
+            mutableUiState.update {
+                it.copy(bookPageIndexError = "全书页码尚未准备好")
+            }
+            return
+        }
+        cancelWindowForNavigation()
+        val fromOffset = currentAnchorOffset
+        val returnOriginOffset = stableAnchorOffset
+        val targetOffset = page.startOffset.coerceIn(0, state.contentLength.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
+        val currentState = mutableUiState.value
+        val loaded = loadedWindow
+        val visiblePageIndex = currentState.pages.indexOfFirst { it == page }
+        if (loaded != null && visiblePageIndex >= 0) {
+            clearNavigationError()
+            if (moveToPage(visiblePageIndex, targetOffset, commitProgress = true)) {
+                navigationController.commitChapterJump(fromOffset, targetOffset, returnOriginOffset)
+                publishNavigationState()
+            }
+            return
+        }
+        clearNavigationError()
+        requestTextWindow(
+            anchorOffset = targetOffset,
+            saveAfterLoad = true,
+            indexedTargetPage = page,
+            onSuccess = {
+                navigationController.commitChapterJump(fromOffset, targetOffset, returnOriginOffset)
+                publishNavigationState()
+            },
+        )
+    }
+
+    override fun jumpToChapter(offset: Int) {
+        cancelWindowForNavigation()
         val state = mutableUiState.value
         if (state.book == null) return
         val safeOffset = offset.toLong().coerceIn(0, state.contentLength).toInt()
-        navigationController.jump(currentAnchorOffset, safeOffset, reason)
-        publishNavigationState()
-        navigateToOffset(safeOffset, commitProgress = false)
+        val fromOffset = currentAnchorOffset
+        val returnOriginOffset = stableAnchorOffset
+        navigateToOffset(safeOffset, commitProgress = true) {
+            navigationController.commitChapterJump(fromOffset, safeOffset, returnOriginOffset)
+            publishNavigationState()
+        }
+    }
+
+    override fun jumpTemporarily(offset: Int, reason: ReaderJumpReason) {
+        cancelWindowForNavigation()
+        val state = mutableUiState.value
+        if (state.book == null) return
+        val safeOffset = offset.toLong().coerceIn(0, state.contentLength).toInt()
+        val fromOffset = currentAnchorOffset
+        navigateToOffset(safeOffset, commitProgress = false) {
+            navigationController.jumpTemporarily(fromOffset, safeOffset, reason)
+            publishNavigationState()
+        }
     }
 
     override fun navigateBack() {
-        val target = navigationController.back() ?: return
-        publishNavigationState()
-        navigateToOffset(target, commitProgress = false)
+        val target = navigationController.peekBack() ?: return
+        navigateToOffset(target.offset, commitProgress = target.commitProgress) {
+            if (navigationController.consumeBack(target)) publishNavigationState()
+        }
     }
 
     override fun returnToOrigin() {
-        val target = navigationController.returnToOrigin() ?: return
-        publishNavigationState()
-        navigateToOffset(target, commitProgress = false)
+        val target = navigationController.peekReturnToOrigin() ?: return
+        navigateToOffset(target.offset, commitProgress = target.commitProgress) {
+            if (navigationController.consumeReturnToOrigin(target)) publishNavigationState()
+        }
     }
 
     override fun continueFromHere() {
         if (!navigationController.isBrowsingTemporarily) return
+        if (mutableUiState.value.isPaginating || pendingRestoreOffset != null) return
         navigationController.continueHere()
         stableAnchorOffset = currentAnchorOffset
         publishNavigationState()
@@ -1313,32 +1568,59 @@ class ReaderViewModel @Inject constructor(
                 stableAnchorOffset = stableAnchorOffset,
                 isBrowsingTemporarily = navigationController.isBrowsingTemporarily,
                 canNavigateBack = navigationController.canGoBack,
+                canReturnToOrigin = navigationController.canReturnToOrigin,
             )
         }
     }
 
-    private fun navigateToOffset(offset: Int, commitProgress: Boolean) {
+    private fun navigateToOffset(
+        offset: Int,
+        commitProgress: Boolean,
+        onSuccess: (() -> Unit)? = null,
+    ) {
+        cancelWindowForNavigation()
         val state = mutableUiState.value
-        if (state.book == null) return
+        val book = state.book ?: return
+        clearNavigationError()
         val safeOffset = offset.toLong().coerceIn(0, state.contentLength).toInt()
+        val previousPendingRestoreOffset = pendingRestoreOffset
         pendingRestoreOffset = null
-        currentAnchorOffset = safeOffset
         val window = loadedWindow
         val outsideLoadedWindow = window == null ||
             safeOffset.toLong() < window.startOffset ||
             (safeOffset.toLong() >= window.endOffset && safeOffset.toLong() < state.contentLength)
         if (outsideLoadedWindow) {
-            requestTextWindow(safeOffset, saveAfterLoad = commitProgress)
+            requestTextWindow(
+                safeOffset,
+                saveAfterLoad = commitProgress,
+                onSuccess = onSuccess,
+            )
             return
         }
         val coveredStart = state.pages.firstOrNull()?.startOffset ?: Int.MAX_VALUE
         val coveredEnd = state.pages.lastOrNull()?.endOffset ?: Int.MIN_VALUE
-        if (safeOffset !in coveredStart..coveredEnd && currentLayoutSpec != null) {
-            requestRepagination(currentLayoutSpec!!, safeOffset)
+        val outsidePagedRange = safeOffset < coveredStart ||
+            (safeOffset >= coveredEnd && safeOffset.toLong() < state.contentLength)
+        if (outsidePagedRange && currentLayoutSpec != null) {
+            requestRepagination(
+                spec = currentLayoutSpec!!,
+                requestedAnchorOffset = safeOffset,
+                isNavigationRequest = true,
+                restorePendingOffsetOnFailure = previousPendingRestoreOffset,
+                onSuccess = {
+                    currentAnchorOffset = safeOffset
+                    if (commitProgress) {
+                        stableAnchorOffset = safeOffset
+                        mutableUiState.update { it.copy(stableAnchorOffset = stableAnchorOffset) }
+                        loadedWindow?.let { submitStableProgress(book, safeOffset, it) }
+                    }
+                    onSuccess?.invoke()
+                },
+            )
             return
         }
         val pageIndex = pageIndexAt(state.pages, safeOffset)
-        moveToPage(pageIndex, safeOffset, commitProgress)
+        if (moveToPage(pageIndex, safeOffset, commitProgress)) onSuccess?.invoke()
     }
 
     override fun updateSettings(settings: ReaderSettings) {
@@ -1635,11 +1917,13 @@ class ReaderViewModel @Inject constructor(
     ) {
         val spec = currentLayoutSpec ?: return
         val adjusted = spec.withAppearance(previous, next)
+        if (adjusted != currentLayoutSpec) invalidateBookPageIndex()
         currentLayoutSpec = adjusted
         requestRepagination(adjusted, anchorOffset)
     }
 
     override fun goToPage(index: Int) {
+        clearNavigationError()
         val page = mutableUiState.value.pages.getOrNull(index) ?: return
         moveToPage(
             index = index,
@@ -1649,7 +1933,15 @@ class ReaderViewModel @Inject constructor(
         )
     }
 
-    private fun moveToPage(index: Int, anchorOffset: Int, commitProgress: Boolean) {
+    fun advanceSpeechTo(offset: Int) {
+        val state = mutableUiState.value
+        if (state.isPaginating || offset < 0 || offset >= state.contentLength) return
+        val commit = !navigationController.isBrowsingTemporarily && state.appearanceEdit == null
+        val index = state.pages.indexOfFirst { offset >= it.startOffset && offset < it.endOffset }
+        if (index >= 0) moveToPage(index, offset, commit) else requestTextWindow(offset, saveAfterLoad = commit)
+    }
+
+    private fun moveToPage(index: Int, anchorOffset: Int, commitProgress: Boolean): Boolean {
         val state = mutableUiState.value
         // A coarse placeholder page must never overwrite an exact saved anchor. Once measured
         // pagination has settled, a leftover restore marker must not permanently disable reading.
@@ -1658,10 +1950,10 @@ class ReaderViewModel @Inject constructor(
                 isPaginating = state.isPaginating,
                 hasMeasuredLayout = currentLayoutSpec != null,
             )
-        ) return
+        ) return false
         pendingRestoreOffset = null
-        val book = state.book ?: return
-        if (index !in state.pages.indices) return
+        val book = state.book ?: return false
+        if (index !in state.pages.indices) return false
         currentAnchorOffset = anchorOffset.toLong().coerceIn(0, state.contentLength).toInt()
         if (commitProgress) stableAnchorOffset = currentAnchorOffset
         mutableUiState.update {
@@ -1678,6 +1970,7 @@ class ReaderViewModel @Inject constructor(
             }
             prefetchIfNeeded(index, currentAnchorOffset, state, windowSnapshot)
         }
+        return true
     }
 
     private fun prefetchIfNeeded(
@@ -1693,22 +1986,41 @@ class ReaderViewModel @Inject constructor(
         if (nearStart || nearEnd) requestTextWindow(anchorOffset, saveAfterLoad = false)
     }
 
-    private fun requestTextWindow(anchorOffset: Int, saveAfterLoad: Boolean) {
+    /** Explicit navigation supersedes prefetch or an unfinished jump without promoting its target. */
+    private fun cancelWindowForNavigation() {
+        if (windowJob?.isActive != true) return
+        val visibleAnchor = windowRequestOriginOffset ?: currentAnchorOffset
+        beginLayoutSnapshotRequest()
+        windowJob = null
+        windowRequestOriginOffset = null
+        pendingRestoreOffset = null
+        currentAnchorOffset = visibleAnchor
+        mutableUiState.update { it.copy(anchorOffset = visibleAnchor, isPaginating = false) }
+    }
+
+    private fun requestTextWindow(
+        anchorOffset: Int,
+        saveAfterLoad: Boolean,
+        indexedTargetPage: ReaderPage? = null,
+        onSuccess: (() -> Unit)? = null,
+    ) {
         val state = mutableUiState.value
         val book = state.book ?: return
         if (windowJob?.isActive == true) return
         val chapters = state.chapters
         val chaptersManuallyEdited = state.chaptersManuallyEdited
         val spec = currentLayoutSpec
+        val chapterGeneration = chapterMutationGeneration
         val generation = beginLayoutSnapshotRequest()
         val safeAnchor = anchorOffset.toLong().coerceIn(0, state.contentLength).toInt()
+        val previousAnchorOffset = currentAnchorOffset
+        windowRequestOriginOffset = previousAnchorOffset
         pendingRestoreOffset = safeAnchor
         currentAnchorOffset = safeAnchor
-        if (saveAfterLoad) stableAnchorOffset = safeAnchor
         mutableUiState.update {
             it.copy(
                 isPaginating = true,
-                anchorOffset = safeAnchor,
+                anchorOffset = currentAnchorOffset,
                 stableAnchorOffset = stableAnchorOffset,
             )
         }
@@ -1718,23 +2030,40 @@ class ReaderViewModel @Inject constructor(
                     normalizedPath = book.normalizedPath,
                     anchorOffset = safeAnchor.toLong(),
                     beforeUtf16Units = TEXT_WINDOW_BEFORE,
-                    afterUtf16Units = TEXT_WINDOW_AFTER,
+                    afterUtf16Units = indexedTargetPage?.let { target ->
+                        maxOf(
+                            TEXT_WINDOW_AFTER,
+                            (target.endOffset.toLong() - safeAnchor.toLong() + 1L)
+                                .coerceAtMost(Int.MAX_VALUE.toLong())
+                                .toInt(),
+                        )
+                    } ?: TEXT_WINDOW_AFTER,
                 )
                 val preparedLayout = withContext(computationDispatcher) {
                     prepareLayout(window, chapters, chaptersManuallyEdited)
                 }
-                val pages = if (spec == null) {
+                val indexedPages = if (spec != null) {
+                    indexedPagesForWindow(window, indexedTargetPage)
+                } else {
+                    null
+                }
+                val pages = if (indexedTargetPage != null) {
+                    require(indexedPages != null) { "全书页码目标页未完整载入" }
+                    indexedPages
+                } else {
+                    indexedPages ?: if (spec == null) {
                         withContext(computationDispatcher) {
                             paginate(window, coarsePageUtf16Units, preparedLayout.text, chapters)
                         }
-                } else {
-                    paginatePrecisely(
-                        window = window,
-                        spec = spec,
-                        layoutText = preparedLayout.text,
-                        chapters = chapters,
-                        titleRanges = preparedLayout.titleRanges,
-                    )
+                    } else {
+                        paginatePrecisely(
+                            window = window,
+                            spec = spec,
+                            layoutText = preparedLayout.text,
+                            chapters = chapters,
+                            titleRanges = preparedLayout.titleRanges,
+                        )
+                    }
                 }
                 if (!isCurrentWindowSnapshot(
                         generation = generation,
@@ -1742,13 +2071,23 @@ class ReaderViewModel @Inject constructor(
                         chapters = chapters,
                         chaptersManuallyEdited = chaptersManuallyEdited,
                         spec = spec,
+                        chapterGeneration = chapterGeneration,
                     )
                 ) return@launch
                 loadedWindow = window
+                windowRequestOriginOffset = null
                 loadedLayoutText = preparedLayout.text
-                val pageIndex = pageIndexAt(pages, safeAnchor)
+                currentAnchorOffset = safeAnchor
+                if (saveAfterLoad) stableAnchorOffset = safeAnchor
+                val pageIndex = if (indexedTargetPage != null) {
+                    pages.indexOfFirst { it == indexedTargetPage }
+                        .takeIf { it >= 0 }
+                        ?: pageIndexAt(pages, safeAnchor)
+                } else {
+                    pageIndexAt(pages, safeAnchor)
+                }
                 pendingRestoreOffset = safeAnchor.takeIf {
-                    spec == null && pages.getOrNull(pageIndex)?.startOffset != it
+                    indexedTargetPage == null && spec == null && pages.getOrNull(pageIndex)?.startOffset != it
                 }
                 mutableUiState.update {
                     it.copy(
@@ -1760,10 +2099,12 @@ class ReaderViewModel @Inject constructor(
                         pages = pages,
                         currentPageIndex = pageIndex,
                         anchorOffset = safeAnchor,
+                        stableAnchorOffset = stableAnchorOffset,
                         isPaginating = false,
                     )
                 }
-                if (saveAfterLoad && spec != null) submitStableProgress(book, safeAnchor, window)
+                if (saveAfterLoad) submitStableProgress(book, safeAnchor, window)
+                onSuccess?.invoke()
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {
@@ -1773,13 +2114,63 @@ class ReaderViewModel @Inject constructor(
                         chapters = chapters,
                         chaptersManuallyEdited = chaptersManuallyEdited,
                         spec = spec,
+                        chapterGeneration = chapterGeneration,
                     )
                 ) return@launch
                 pendingRestoreOffset = null
+                currentAnchorOffset = previousAnchorOffset
+                windowRequestOriginOffset = null
                 mutableUiState.update {
-                    it.copy(isPaginating = false, errorMessage = "读取正文失败")
+                    it.copy(
+                        isPaginating = false,
+                        anchorOffset = previousAnchorOffset,
+                        stableAnchorOffset = stableAnchorOffset,
+                        navigationErrorMessage = "读取正文失败",
+                    )
                 }
             }
+        }
+    }
+
+    private fun indexedPagesForWindow(
+        window: TextWindow,
+        targetPage: ReaderPage?,
+    ): List<ReaderPage>? {
+        val state = mutableUiState.value
+        if (state.book == null || currentLayoutSpec == null) return null
+        val key = bookPageIndexKey ?: return null
+        if (key != currentBookPageIndexKey(state)) return null
+        val indexed = state.bookPages ?: return null
+        val windowStart = window.startOffset.toInt()
+        val windowEnd = window.endOffset.toInt()
+        if (targetPage != null &&
+            (targetPage.startOffset < windowStart || targetPage.endOffset > windowEnd)
+        ) return null
+        val visible = indexed.filter { page ->
+            page.startOffset >= windowStart && page.endOffset <= windowEnd
+        }
+        if (targetPage != null && targetPage !in visible) return null
+        return visible.takeIf { it.isNotEmpty() }
+    }
+
+    private fun currentBookPageIndexKey(state: ReaderUiState): ReaderBookPageIndexKey? {
+        val book = state.book ?: return null
+        val spec = currentLayoutSpec ?: return null
+        return ReaderBookPageIndexKey(
+            bookId = book.id,
+            normalizedPath = book.normalizedPath,
+            totalUtf16Length = state.contentLength,
+            spec = spec,
+            chapters = state.chapters,
+            chaptersManuallyEdited = state.chaptersManuallyEdited,
+            generation = bookPageIndexGeneration,
+            chapterGeneration = chapterMutationGeneration,
+        )
+    }
+
+    private fun clearNavigationError() {
+        if (mutableUiState.value.navigationErrorMessage != null) {
+            mutableUiState.update { it.copy(navigationErrorMessage = null) }
         }
     }
 
@@ -1789,9 +2180,11 @@ class ReaderViewModel @Inject constructor(
         chapters: List<DetectedChapter>,
         chaptersManuallyEdited: Boolean,
         spec: ReaderLayoutSpec?,
+        chapterGeneration: Long,
     ): Boolean {
         val state = mutableUiState.value
         return generation == layoutSnapshotGeneration &&
+            chapterGeneration == chapterMutationGeneration &&
             state.book?.id == bookId &&
             state.chapters == chapters &&
             state.chaptersManuallyEdited == chaptersManuallyEdited &&
@@ -1830,6 +2223,7 @@ class ReaderViewModel @Inject constructor(
 
     override fun leaveReader(afterFlush: () -> Unit) {
         themeScheduleController.stop()
+        cancelBookPageIndex()
         clearProgressPreview()
         viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
             try {
@@ -1846,6 +2240,7 @@ class ReaderViewModel @Inject constructor(
 
     override fun onCleared() {
         themeScheduleController.stop()
+        bookPageIndexJob?.cancel()
         progressPreviewJob?.cancel()
         readingSessionTracker.onReaderBackground()
     }
@@ -1971,7 +2366,6 @@ class ReaderViewModel @Inject constructor(
         const val DEFAULT_PAGE_UTF16_UNITS = 850
         const val MAX_SEARCH_RESULTS = 100
         const val CHAPTER_SCAN_CHUNK = 256 * 1024
-        const val CHAPTER_SCAN_OVERLAP = 512
         const val TEXT_WINDOW_BEFORE = 50_000
         const val TEXT_WINDOW_AFTER = 100_000
         const val PREFETCH_PAGE_THRESHOLD = 8

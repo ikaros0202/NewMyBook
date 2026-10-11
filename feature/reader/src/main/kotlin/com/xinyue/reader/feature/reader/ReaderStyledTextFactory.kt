@@ -57,6 +57,9 @@ class ReaderStyledTextFactory @Inject constructor(
         paint.typeface = resolveTypeface(spec)
     }
 
+    internal fun lineSpacingAdd(paint: TextPaint, spec: ReaderLayoutSpec): Float =
+        spec.lineHeightPx - paint.fontSpacing
+
     fun resolveTypeface(spec: ReaderLayoutSpec): Typeface =
         typefaceResolver.resolve(spec.font, spec.fontWeight)
 

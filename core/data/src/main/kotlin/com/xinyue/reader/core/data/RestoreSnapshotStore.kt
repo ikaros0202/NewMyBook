@@ -105,7 +105,7 @@ class RestoreSnapshotStore(private val privateRoot: File) {
         snapshot.files.forEach { record ->
             val live = BackupPathPolicy.resolve(privateRoot, record.targetRelativePath)
             if (!record.existed) {
-                live.delete()
+                require(!live.exists() || live.delete()) { "无法移除恢复新增文件" }
             } else {
                 val saved = BackupPathPolicy.resolve(File(snapshot.root, "files"), record.targetRelativePath)
                 atomicCopy(saved, live)

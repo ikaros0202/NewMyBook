@@ -12,6 +12,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'assert-empty-acceptance-device.ps1')
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
 $deviceRunner = Join-Path $PSScriptRoot 'run-v1.2-device-matrix.ps1'
 $fixture = Join-Path $repoRoot 'qa\sample-novel.txt'
@@ -122,8 +123,9 @@ $captureCommands = @(
 )
 $commands = @(
     "verify candidateId=$($candidate.candidateId) apkSha256=$($candidate.artifacts.acceptanceApk.sha256) testApkSha256=$testHash",
-    "adb -s $Serial install -r $Apk",
-    "adb -s $Serial install -r $testApk",
+    'verify every Android user has no installed or retained production/test package; otherwise refuse',
+    "adb -s $Serial install $Apk",
+    "adb -s $Serial install $testApk",
     "adb -s $Serial push $fixture $remoteFixture and media scan",
     "row font_scale 1.0 light normal: am instrument $testFilter",
     "row font_scale 2.0 dark high-contrast: am instrument $testFilter",
@@ -139,6 +141,7 @@ $commands = @(
     'capture public-fixture screenshots and scan target-app Fatal/ANR'
 )
 $restoreCommands = @(
+    'uninstall only production/test packages successfully installed by this run after the empty-device guard passed',
     'restore font_scale',
     'restore high_text_contrast_enabled',
     'restore ui_night_mode with settings/cmd uimode',
@@ -181,6 +184,7 @@ $logPath = Join-Path $evidenceDir 'instrumentation.log'
 $metadataPath = Join-Path $evidenceDir 'accessibility-metadata.json'
 $fatalPath = Join-Path $evidenceDir 'fatal-anr-scan.txt'
 
+Assert-EmptyAcceptanceDevice -InvokeAdb { param($AdbArguments) Invoke-Adb -Arguments $AdbArguments }
 $before = [ordered]@{
     fontScale = Read-Setting system font_scale
     highTextContrast = Read-Setting secure high_text_contrast_enabled
@@ -202,11 +206,13 @@ $failure = $null
 $started = [DateTimeOffset]::UtcNow.ToString('o')
 $rows = @()
 $restoration = $null
+$installedAppByRun = $false
+$installedTestByRun = $false
 try {
-    Invoke-Adb -Arguments @('uninstall', 'com.xinyue.reader') -AllowFailure | Out-Null
-    Invoke-Adb -Arguments @('uninstall', 'com.xinyue.reader.test') -AllowFailure | Out-Null
-    Invoke-Adb -Arguments @('install', '-r', $Apk) | Out-Null
-    Invoke-Adb -Arguments @('install', '-r', $testApk) | Out-Null
+    Invoke-Adb -Arguments @('install', $Apk) | Out-Null
+    $installedAppByRun = $true
+    Invoke-Adb -Arguments @('install', $testApk) | Out-Null
+    $installedTestByRun = $true
     Invoke-Adb -Arguments @('push', $fixture, $remoteFixture) | Out-Null
     Invoke-Adb -Arguments @('shell', 'touch', $remoteFixture) | Out-Null
     Invoke-Adb -Arguments @('shell', 'am', 'broadcast', '-a', 'android.intent.action.MEDIA_SCANNER_SCAN_FILE', '-d', "file://$remoteFixture") | Out-Null
@@ -315,6 +321,8 @@ try {
     $failure = $_.Exception.Message
     throw
 } finally {
+    if ($installedTestByRun) { Invoke-Adb -Arguments @('uninstall', 'com.xinyue.reader.test') -AllowFailure | Out-Null }
+    if ($installedAppByRun) { Invoke-Adb -Arguments @('uninstall', 'com.xinyue.reader') -AllowFailure | Out-Null }
     Restore-Setting system font_scale $before.fontScale
     Restore-Setting secure high_text_contrast_enabled $before.highTextContrast
     Restore-UiModeNight $before.uiModeNight

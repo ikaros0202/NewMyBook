@@ -102,12 +102,14 @@ class ReleaseCriticalJourneyTest {
         }
 
         enterBookSelection()
+        compose.onNode(hasText("集合") and hasAnyAncestor(hasTestTag("library-selection-bar"))).performClick()
         compose.onNodeWithText("移动到").performClick()
         clickPopupText(GROUP_NAME)
         awaitSelectionActionFinished()
 
         enterBookSelection()
-        compose.onNodeWithText("标记已读完").performScrollTo().performClick()
+        compose.onNodeWithText("状态").performClick()
+        compose.onNodeWithText("标记已读完").performClick()
         awaitSelectionActionFinished()
         compose.onNodeWithTag("library-status-finished").performScrollTo().performClick()
         compose.waitUntil(10_000) {
@@ -121,7 +123,7 @@ class ReleaseCriticalJourneyTest {
         compose.onNodeWithText("日").assertIsDisplayed()
         compose.onNodeWithText("周").assertIsDisplayed()
         compose.onNodeWithText("月").assertIsDisplayed()
-        compose.onNodeWithText("返回").performClick()
+        compose.onNodeWithTag("statistics_navigation_back").performClick()
         compose.onNodeWithTag("library_root").assertIsDisplayed()
     }
 
@@ -270,7 +272,7 @@ class ReleaseCriticalJourneyTest {
         compose.onNodeWithTag("nav_settings", useUnmergedTree = true).performClick()
         compose.onNodeWithTag("settings_list").performScrollToNode(hasTestTag("settings_backup"))
         compose.onNodeWithTag("settings_backup").performClick()
-        compose.onNodeWithText("开始导出").performClick()
+        compose.onNodeWithText("导出备份").performClick()
         compose.onNodeWithText("选择保存位置").performClick()
         saveBackupFromDocumentsUi()
         awaitApp()
@@ -284,7 +286,7 @@ class ReleaseCriticalJourneyTest {
         File(context.filesDir, "covers").deleteRecursively()
 
         compose.onNodeWithText("返回备份与恢复").performClick()
-        compose.onNodeWithText("选择备份文件").performClick()
+        compose.onNodeWithText("从备份恢复").performClick()
         selectBackupFromDocumentsUi()
         awaitApp()
         compose.waitUntil(60_000) {
@@ -292,7 +294,7 @@ class ReleaseCriticalJourneyTest {
         }
         compose.onNodeWithText("覆盖整个书架").performClick()
         compose.onNodeWithTag("restore_confirm").performScrollTo().performClick()
-        compose.onNodeWithText("创建快照并覆盖").performClick()
+        compose.onNodeWithText("确认覆盖").performClick()
         compose.waitUntil(60_000) {
             compose.onAllNodesWithText("操作完成").fetchSemanticsNodes().isNotEmpty()
         }

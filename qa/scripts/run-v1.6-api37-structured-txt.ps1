@@ -19,6 +19,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'assert-empty-acceptance-device.ps1')
 
 $script:EndpointName = 'XinYue_API37'
 $script:ExpectedSdk = 37
@@ -47,6 +48,8 @@ $script:CurrentCaseNumber = 0
 $script:CurrentStep = '00'
 $script:DeviceSerial = $null
 $script:OriginalDeviceState = $null
+$script:InstalledAppByRun = $false
+$script:InstalledTestByRun = $false
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $scriptRoot '..\..')).Path
@@ -448,10 +451,10 @@ function Install-AcceptancePackages {
     param([string]$Serial)
     Assert-Runner (Test-Path -LiteralPath $AcceptanceApk -PathType Leaf)
     Assert-Runner (Test-Path -LiteralPath $AcceptanceTestApk -PathType Leaf)
-    [void](Invoke-SerialAdb -Serial $Serial -Arguments @('uninstall', $script:TestPackage) -AllowFailure)
-    [void](Invoke-SerialAdb -Serial $Serial -Arguments @('uninstall', $script:AppPackage) -AllowFailure)
-    [void](Invoke-SerialAdb -Serial $Serial -Arguments @('install', '-r', $AcceptanceApk))
-    [void](Invoke-SerialAdb -Serial $Serial -Arguments @('install', '-r', $AcceptanceTestApk))
+    [void](Invoke-SerialAdb -Serial $Serial -Arguments @('install', $AcceptanceApk))
+    $script:InstalledAppByRun = $true
+    [void](Invoke-SerialAdb -Serial $Serial -Arguments @('install', $AcceptanceTestApk))
+    $script:InstalledTestByRun = $true
 }
 
 function Set-ReaderAcceptanceState {
@@ -598,20 +601,22 @@ function Invoke-CleanupAndRestore {
     param([string]$Serial, [object]$OriginalState)
     $ok = $true
 
-    $result = Invoke-SerialAdb -Serial $Serial -Arguments @('shell', 'am', 'force-stop', $script:AppPackage) -AllowFailure
-    $ok = ($result.ExitCode -eq 0) -and $ok
-    foreach ($remoteTarget in $script:RemoteTargets) {
-        $result = Invoke-SerialAdb -Serial $Serial -Arguments @('shell', 'rm', '-f', $remoteTarget) -AllowFailure
+    if ($script:InstalledAppByRun) {
+        $result = Invoke-SerialAdb -Serial $Serial -Arguments @('shell', 'am', 'force-stop', $script:AppPackage) -AllowFailure
+        $ok = ($result.ExitCode -eq 0) -and $ok
+        foreach ($remoteTarget in $script:RemoteTargets) {
+            $result = Invoke-SerialAdb -Serial $Serial -Arguments @('shell', 'rm', '-f', $remoteTarget) -AllowFailure
+            $ok = ($result.ExitCode -eq 0) -and $ok
+        }
+    }
+    if ($script:InstalledTestByRun) {
+        $result = Invoke-SerialAdb -Serial $Serial -Arguments @('uninstall', $script:TestPackage) -AllowFailure
         $ok = ($result.ExitCode -eq 0) -and $ok
     }
-    $result = Invoke-SerialAdb -Serial $Serial -Arguments @('shell', 'pm', 'clear', $script:AppPackage) -AllowFailure
-    $ok = ($result.ExitCode -eq 0) -and $ok
-    $result = Invoke-SerialAdb -Serial $Serial -Arguments @('shell', 'pm', 'clear', $script:TestPackage) -AllowFailure
-    $ok = ($result.ExitCode -eq 0) -and $ok
-    $result = Invoke-SerialAdb -Serial $Serial -Arguments @('uninstall', $script:TestPackage) -AllowFailure
-    $ok = ($result.ExitCode -eq 0) -and $ok
-    $result = Invoke-SerialAdb -Serial $Serial -Arguments @('uninstall', $script:AppPackage) -AllowFailure
-    $ok = ($result.ExitCode -eq 0) -and $ok
+    if ($script:InstalledAppByRun) {
+        $result = Invoke-SerialAdb -Serial $Serial -Arguments @('uninstall', $script:AppPackage) -AllowFailure
+        $ok = ($result.ExitCode -eq 0) -and $ok
+    }
 
     if ($null -eq $OriginalState) {
         $ok = $false
@@ -654,6 +659,9 @@ try {
     } else {
         # Re-resolve the live endpoint through ADB before every device action.
         $device = Assert-ApprovedEndpoint -Endpoints @(Get-LiveEndpointProbe)
+        Assert-EmptyAcceptanceDevice -InvokeAdb { param($AdbArguments)
+            Invoke-SerialAdb -Serial ([string]$device.Serial) -Arguments $AdbArguments
+        }
         $script:DeviceSerial = [string]$device.Serial
         Assert-Runner (Test-Path -LiteralPath $PublicFixturePath -PathType Leaf)
         Assert-Runner ($cases.Count -ge 2)

@@ -12,6 +12,10 @@ import com.xinyue.reader.core.domain.model.RestoreEntityKind
 import com.xinyue.reader.core.domain.model.RestorePlan
 import com.xinyue.reader.core.domain.model.RestorePreview
 import java.util.Locale
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 class RestorePlanner(
     private val annotationConflictTargetFactory: ((BackupAnnotationRecord, String) -> String)? = null,
@@ -318,13 +322,23 @@ class RestorePlanner(
         actions: MutableList<RestoreEntityAction>,
         conflicts: MutableList<RestoreConflict>,
     ) {
+        val bookTitles = backup.books.associate { it.id to it.title }
         val currentSessions = current.sessions.associateBy { it.id }
         backup.sessions.sortedBy { it.id }.forEach { incoming ->
             val targetBook = requireNotNull(bookIdRemap[incoming.bookId]) { "阅读会话引用未知书籍" }
             val local = currentSessions[incoming.id]
             val identical = local != null && incoming.copy(bookId = targetBook) == local
             val action = when { local == null -> RestoreActionKind.INSERT; identical -> RestoreActionKind.SKIP_IDENTICAL; else -> RestoreActionKind.KEEP_LOCAL }
-            if (local != null && !identical) conflicts += choiceConflict("session:${incoming.id}", RestoreConflictKind.STATISTICS, incoming.id)
+            if (local != null && !identical) {
+                val started = runCatching {
+                    Instant.ofEpochMilli(incoming.startedAtEpochMillis).atZone(ZoneId.systemDefault())
+                        .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
+                }.getOrDefault("阅读会话")
+                conflicts += choiceConflict(
+                    "session:${incoming.id}", RestoreConflictKind.STATISTICS,
+                    "《${bookTitles[incoming.bookId].orEmpty()}》 · $started",
+                )
+            }
             actions += RestoreEntityAction(RestoreEntityKind.SESSION, incoming.id, incoming.id, action, mapOf("bookId" to targetBook))
         }
         val currentDaily = current.dailyStats.associateBy { it.bookId to it.localEpochDay }
@@ -334,7 +348,14 @@ class RestorePlanner(
             val local = currentDaily[targetBook to incoming.localEpochDay]
             val identical = local != null && incoming.copy(bookId = targetBook) == local
             val action = when { local == null -> RestoreActionKind.INSERT; identical -> RestoreActionKind.SKIP_IDENTICAL; else -> RestoreActionKind.KEEP_LOCAL }
-            if (local != null && !identical) conflicts += choiceConflict("daily:$targetId", RestoreConflictKind.STATISTICS, targetId)
+            if (local != null && !identical) {
+                val day = runCatching { LocalDate.ofEpochDay(incoming.localEpochDay).toString() }
+                    .getOrDefault("每日统计")
+                conflicts += choiceConflict(
+                    "daily:$targetId", RestoreConflictKind.STATISTICS,
+                    "《${bookTitles[incoming.bookId].orEmpty()}》 · $day",
+                )
+            }
             actions += RestoreEntityAction(RestoreEntityKind.DAILY_STAT, "${incoming.bookId}:${incoming.localEpochDay}", targetId, action, mapOf("bookId" to targetBook))
         }
     }

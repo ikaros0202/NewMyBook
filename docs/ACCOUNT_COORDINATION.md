@@ -21,6 +21,6 @@
 ## 共享配置与隐私
 
 - `account_a`、`account_b` 是本地别名，并继承同一 `sharedProfile`；每个账号可以通过 `XINYUE_WORKSPACE`、`JAVA_HOME`、`ANDROID_SDK_ROOT` 和 `XINYUE_PRIVATE_QA_ROOT` 提供本机路径。
-- `XINYUE_PRIVATE_QA_ROOT` 必须指向仓库外目录。私人正文、字体、备份、原始 XML、日志、截图、唯一文件指纹和脱敏前证据不写入接力页或仓库。
+- `XINYUE_PRIVATE_QA_ROOT` 可指向项目内被 Git 忽略的 `private-local/qa/private-regression/`。私人正文、字体、备份、原始 XML、日志、截图、唯一文件指纹和脱敏前证据不写入公开接力页或源码版本历史。
 - 不在配置或交接页保存邮箱、密码、令牌、Cookie、API key、恢复码、签名密钥或其他登录凭据。
 - 如果两个账号使用不同 Windows 用户，只调整各自环境变量；当前任务、基线和代码仍以共享工作区为准。

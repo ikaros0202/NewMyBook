@@ -11,7 +11,7 @@ class ReleaseSelectionTest {
     @Test
     fun nonDebuggableReleaseLikeTargetSupportsCompleteSelectionJourney() {
         ReleaseSelectionJourney().run {
-            resetAndLaunch()
+            launchPublicSession()
             assertNonDebuggableTarget()
             importAndOpenPublicFixture()
             assertSelectionSuppressesAndRestoresPaging()

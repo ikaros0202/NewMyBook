@@ -39,3 +39,10 @@ private-qa/
 !/qa/v1.6/
 /qa/v1.6/*
 !/qa/v1.6/structured-txt-sample.txt
+
+# Keep raw device evidence and built packages local; publish maintained QA prose.
+/qa/current/**
+!/qa/current/**/
+!/qa/current/**/*.md
+__pycache__/
+*.pyc

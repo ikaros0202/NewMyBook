@@ -1,6 +1,10 @@
 package com.xinyue.reader.feature.backup
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -20,6 +24,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.xinyue.reader.core.data.BackupWorkStatus
 import com.xinyue.reader.core.data.HandoffWorkType
@@ -41,15 +46,15 @@ internal fun HandoffExportDialog(
         onDismissRequest = onDismiss,
         title = { Text("导出单书阅读接力包") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("接力包未加密，包含进度、完成状态、书签、高亮、批注、单书设置、系列和集合信息。")
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("将这本书的阅读进度、笔记和设置带到另一台设备。接力包未加密，请妥善保存。")
                 LazyColumn(Modifier.heightIn(max = 280.dp)) {
                     items(books, key = { it.id }) { book ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .heightIn(min = 48.dp)
-                                .clickable { onBookSelected(book.id) },
+                                .selectable(selected = selectedBookId == book.id, role = Role.RadioButton, onClick = { onBookSelected(book.id) }),
                         ) {
                             RadioButton(
                                 selected = selectedBookId == book.id,
@@ -67,23 +72,23 @@ internal fun HandoffExportDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 48.dp)
-                        .clickable { onIncludeBookTextChanged(!includeBookText) },
+                        .toggleable(value = includeBookText, role = Role.Checkbox, onValueChange = onIncludeBookTextChanged),
                 ) {
                     Checkbox(checked = includeBookText, onCheckedChange = null)
                     Text("包含小说正文", modifier = Modifier.padding(top = 12.dp))
                 }
                 Text(
                     if (includeBookText) {
-                        "包含正文会让接力包可在目标设备导入新书，也会携带完整私人小说内容，请只保存到可信位置。"
+                        "包含正文后，可在另一台设备直接导入这本书。"
                     } else {
-                        "默认不含正文；目标设备必须已有内容摘要完全一致的书籍，否则会拒绝应用。"
+                        "不包含正文时，另一台设备须先导入内容完全相同的 TXT。"
                     },
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
         },
         confirmButton = {
-            Button(onClick = onConfirm, enabled = selectedBookId != null) { Text("选择保存位置") }
+            Button(shape = MaterialTheme.shapes.medium, onClick = onConfirm, enabled = selectedBookId != null) { Text("选择保存位置") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
@@ -106,7 +111,7 @@ internal fun HandoffPreviewScreen(
         item {
             Text("阅读接力预览", style = MaterialTheme.typography.headlineSmall)
             Text(preview.title, style = MaterialTheme.typography.titleMedium)
-            Text(if (preview.includesBookText) "接力包包含正文" else "接力包不含正文，已完成精确内容摘要匹配")
+            Text(if (preview.includesBookText) "接力包包含正文" else "已找到本机相同的书籍，接力包不含正文")
         }
         item {
             Text(
@@ -135,7 +140,7 @@ internal fun HandoffPreviewScreen(
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 TextButton(onClick = onCancel) { Text("取消") }
-                Button(
+                Button(shape = MaterialTheme.shapes.medium,
                     onClick = onImport,
                     enabled = canImport,
                     modifier = Modifier.testTag("handoff_import_confirm"),
@@ -164,12 +169,12 @@ internal fun HandoffResultContent(
             succeeded && work.type == HandoffWorkType.IMPORT -> {
                 Text(
                     if (work.importedNewBook) "已导入新书并应用阅读状态。"
-                    else "已把阅读状态安全合并到摘要一致的本机书籍。",
+                    else "已将进度和笔记合并到本机的同一本书。",
                 )
                 Text("应用 ${work.appliedCount} 项 · 跳过 ${work.skippedCount} 项 · 冲突副本 ${work.conflictCopyCount} 项")
             }
             else -> Text(state.handoffMessage ?: "现有书架数据未受影响，可以返回后重试。")
         }
-        Button(onClick = onReset) { Text("返回本地数据") }
+        Button(shape = MaterialTheme.shapes.medium, onClick = onReset) { Text("返回备份与恢复") }
     }
 }

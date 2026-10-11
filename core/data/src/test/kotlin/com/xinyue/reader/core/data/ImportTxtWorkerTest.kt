@@ -207,7 +207,7 @@ class ImportTxtWorkerTest {
 
         override suspend fun commit(staged: StagedBookFiles): StoredBookFiles = error("not used")
         override suspend fun discard(staged: StagedBookFiles) = Unit
-        override suspend fun remove(stored: StoredBookFiles) = Unit
+        override suspend fun remove(stored: StoredBookFiles, preserveCover: Boolean, ownerBookId: String?) = Unit
     }
 
     private class EmptyBookRepository(existing: Book? = null) : BookRepository {

@@ -138,9 +138,7 @@ class LocalBookCoverRepository internal constructor(
 
     private fun safeBookDirectory(book: BookEntity): File {
         val expected = File(booksRoot, book.id).canonicalFile
-        require(expected.toPath().startsWith(booksRoot.toPath())) { "非法书籍封面目录" }
-        val original = File(root, book.originalPath).canonicalFile
-        require(original.parentFile == expected) { "书籍私有路径与书籍 ID 不一致" }
+        require(expected.parentFile == booksRoot) { "非法书籍封面目录" }
         return expected
     }
 

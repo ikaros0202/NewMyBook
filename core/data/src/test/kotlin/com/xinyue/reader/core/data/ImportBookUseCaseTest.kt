@@ -11,10 +11,39 @@ import java.io.ByteArrayInputStream
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.StandardTestDispatcher
+import org.junit.Rule
+import org.junit.rules.TemporaryFolder
 import org.junit.Test
 import kotlin.test.assertFailsWith
 
 class ImportBookUseCaseTest {
+    @get:Rule val temporary = TemporaryFolder()
+
+    @Test
+    fun `repeated replacement preserves stable cover and final removal cleans both directories`() = runTest {
+        val root = temporary.newFolder()
+        val repository = FakeBookRepository()
+        val store = LocalBookFileStore(root, StandardTestDispatcher(testScheduler))
+        var id = 0
+        val importer = ImportBookUseCase(repository, store, { "book-${++id}" }, { 1L })
+        val first = importer(sampleSource(), "UTF-8")
+        val coverPath = "books/${first.id}/cover.png"
+        val cover = root.resolve(coverPath).apply { writeText("public-cover") }
+        repository.books.value = listOf(first.copy(customCoverPath = coverPath))
+        repeat(2) { importer.importReliably(sampleSource(), "UTF-8", DuplicateResolution.REPLACE) }
+        val replaced = repository.books.value.single()
+
+        assertThat(replaced.id).isEqualTo(first.id)
+        assertThat(replaced.customCoverPath).isEqualTo(coverPath)
+        assertThat(cover.readText()).isEqualTo("public-cover")
+        assertThat(root.resolve(first.normalizedPath).exists()).isFalse()
+        assertThat(root.resolve(replaced.normalizedPath).readText()).isEqualTo("第一章")
+
+        store.remove(StoredBookFiles(replaced.originalPath, replaced.normalizedPath), ownerBookId = replaced.id)
+        assertThat(cover.exists()).isFalse()
+        assertThat(root.resolve(replaced.normalizedPath).exists()).isFalse()
+    }
     @Test
     fun `stages commits and publishes a local txt book`() = runTest {
         val repository = FakeBookRepository()
@@ -243,7 +272,7 @@ class ImportBookUseCaseTest {
             discardedIds += staged.bookId
         }
 
-        override suspend fun remove(stored: StoredBookFiles) {
+        override suspend fun remove(stored: StoredBookFiles, preserveCover: Boolean, ownerBookId: String?) {
             removedPaths += stored.normalizedPath
         }
     }
@@ -277,7 +306,8 @@ class ImportBookUseCaseTest {
 
         override suspend fun replaceBook(existingBookId: String, replacement: Book) {
             replacements += existingBookId to replacement.id
-            books.value = books.value.filterNot { it.id == existingBookId } + replacement
+            val existing = books.value.single { it.id == existingBookId }
+            books.value = books.value.filterNot { it.id == existingBookId } + replacement.copy(customCoverPath = existing.customCoverPath)
         }
 
         override suspend fun markOpened(bookId: String, epochMillis: Long) = Unit

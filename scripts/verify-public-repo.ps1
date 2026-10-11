@@ -88,7 +88,16 @@ if ($PrivateDenylistPath) {
     }
     $denylistFullPath = (Resolve-Path -LiteralPath $PrivateDenylistPath).Path
     if ($denylistFullPath.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-        throw "Private denylist must be stored outside the repository"
+        $denylistRelativePath = $denylistFullPath.Substring($rootPrefix.Length).Replace('\', '/')
+        if (-not $denylistRelativePath.StartsWith('private-local/qa/', [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "An in-project private denylist must be stored in ignored private-local/qa/"
+        }
+        Push-Location $root
+        try {
+            & git check-ignore -q -- $denylistRelativePath
+            if ($LASTEXITCODE -ne 0) { throw "Private denylist must be excluded from Git" }
+            if (@(& git ls-files -- $denylistRelativePath).Count -gt 0) { throw "Private denylist must not be tracked by Git" }
+        } finally { Pop-Location }
     }
     $denylist = @(Get-Content -Encoding UTF8 -LiteralPath $denylistFullPath | Where-Object {
         $_.Trim() -and -not $_.TrimStart().StartsWith("#")
@@ -98,7 +107,7 @@ if ($PrivateDenylistPath) {
 $textExtensions = @(
     ".bat", ".conf", ".css", ".csv", ".gradle", ".html", ".java", ".js",
     ".json", ".kt", ".kts", ".log", ".md", ".properties", ".ps1", ".sh",
-    ".toml", ".txt", ".xml", ".yaml", ".yml"
+    ".toml", ".txt", ".xml", ".yaml", ".yml", ".py", ".pyw", ".pyi"
 )
 $archiveExtensions = @(".aab", ".apk", ".zip")
 $imageExtensions = @(".gif", ".jpeg", ".jpg", ".png", ".webp")

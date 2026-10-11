@@ -52,10 +52,10 @@ class BackupAccessibilityTest {
         }
 
         compose.onNodeWithContentDescription(
-            "包含小说原文，未选，关闭后，新书正文不能从此备份独立恢复；已有同内容书籍仍可合并元数据",
+            "包含小说原文，未选，关闭后，仅能更新本机已有的相同书籍，不能恢复新书正文",
         ).assertIsDisplayed()
         compose.onNodeWithContentDescription(
-            "包含导入字体，未选，关闭后，导入字体不能独立恢复，相关设置将需要系统字体回退",
+            "包含导入字体，未选，关闭后，缺失的字体将使用系统字体",
         ).assertIsDisplayed()
         listOf("取消", "选择保存位置").forEach { label ->
             val action = compose.onNode(hasText(label) and hasClickAction())
@@ -103,7 +103,8 @@ class BackupAccessibilityTest {
         }
 
         compose.onNodeWithText("包含书签").performClick()
-        compose.onNodeWithText("导出 JSON").performClick()
+        compose.onNodeWithText("JSON").performClick()
+        compose.onNodeWithText("导出").performClick()
         assertTrue(chosen.value == (AnnotationExportFormat.JSON to true))
     }
 

@@ -94,6 +94,7 @@ class ImportBookUseCase(
                     originalPath = existingBook.originalPath,
                     normalizedPath = existingBook.normalizedPath,
                 ),
+                preserveCover = true,
             )
             runCatching { anchorRepairCoordinator?.repairBook(existingBook.id) }
         }

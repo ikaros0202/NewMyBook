@@ -34,6 +34,7 @@
     <string name="reader_theme_active">正在使用</string>
     <string name="reader_theme_builtin">内置</string>
     <string name="reader_theme_apply">应用</string>
+    <string name="reader_ui_theme_more_actions">主题更多操作</string>
     <string name="reader_theme_create">将当前外观保存为主题</string>
     <string name="reader_theme_copy">复制</string>
     <string name="reader_theme_rename">重命名</string>
@@ -52,4 +53,20 @@
     <string name="reader_save">保存</string>
     <string name="reader_cancel">取消</string>
     <string name="reader_confirm">确定</string>
+    <string name="reader_quick_font_size">字号：%1$.0f sp</string>
+    <string name="reader_font_size">字号</string>
+    <string name="reader_quick_brightness">亮度</string>
+    <string name="reader_quick_brightness_system">亮度：跟随系统</string>
+    <string name="reader_quick_brightness_percent">亮度：%1$d%%</string>
+    <string name="reader_quick_brightness_custom">手动调整</string>
+    <string name="reader_quick_follow_system">跟随系统</string>
+    <string name="reader_quick_global_note">亮度沿用全局设置</string>
+    <string name="reader_quick_more">更多设置</string>
+    <string name="reader_quick_paper">纸白</string>
+    <string name="reader_quick_sepia">米黄</string>
+    <string name="reader_quick_green">护眼</string>
+    <string name="reader_quick_dark">深灰</string>
+    <string name="reader_quick_black">纯黑</string>
+    <string name="reader_return_before_chapter">返回跳转前</string>
+    <string name="reader_navigation_failed">读取目标位置失败，已保留原位置。可继续阅读或重试。</string>
 </resources>

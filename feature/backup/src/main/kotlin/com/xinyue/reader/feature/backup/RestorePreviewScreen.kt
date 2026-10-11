@@ -10,12 +10,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -42,6 +46,7 @@ fun RestorePreviewScreen(
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var detailsExpanded by remember { mutableStateOf(false) }
     LazyColumn(
         modifier = modifier.fillMaxSize().testTag("restore_preview"),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -49,27 +54,31 @@ fun RestorePreviewScreen(
         item {
             Text("恢复预览", style = MaterialTheme.typography.headlineSmall)
             Text("备份时间：${formatTime(preview.createdAtEpochMillis)}")
-            Text("格式版本：${preview.formatVersion}")
         }
         item {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("新增 ${preview.newBookCount} 本 · 重复 ${preview.duplicateBookCount} 本 · 冲突 ${preview.conflictCount} 项")
-                    Text("暂存 ${formatBytes(preview.stagingBytes)} · 发布 ${formatBytes(preview.publishBytes)}")
-                    Text("安全快照 ${formatBytes(preview.snapshotBytes)} · 至少需要 ${formatBytes(preview.requiredFreeBytes)} 可用空间")
+                    Text("需要 ${formatBytes(preview.requiredFreeBytes)} 可用空间", style = MaterialTheme.typography.bodyMedium)
                     Text(
                         "正文：${if (preview.options.includeBookText) "包含" else "未包含，不能独立恢复新书"}；" +
                             "字体：${if (preview.options.includeFonts) "包含" else "未包含"}",
                     )
+                    TextButton(onClick = { detailsExpanded = !detailsExpanded }) {
+                        Text(if (detailsExpanded) "收起备份详情" else "备份详情")
+                    }
+                    if (detailsExpanded) {
+                        Text("格式版本：${preview.formatVersion}", style = MaterialTheme.typography.bodySmall)
+                        Text("暂存 ${formatBytes(preview.stagingBytes)} · 恢复文件 ${formatBytes(preview.publishBytes)} · 安全快照 ${formatBytes(preview.snapshotBytes)}", style = MaterialTheme.typography.bodySmall)
+                    }
                 }
-            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         }
         item {
             Text("恢复方式", style = MaterialTheme.typography.titleMedium)
             RestoreModeRow(
                 selected = mode == RestoreMode.MERGE,
                 title = "安全合并（推荐）",
-                consequence = "按正文哈希、新旧时间和下面的选择合并，不删除无关本机数据",
+                consequence = "保留现有书籍，合并相同书籍的进度与笔记；冲突按下方选择处理",
                 onClick = { onModeChanged(RestoreMode.MERGE) },
             )
             RestoreModeRow(
@@ -97,7 +106,7 @@ fun RestorePreviewScreen(
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 TextButton(onClick = onCancel) { Text("取消") }
-                Button(
+                Button(shape = MaterialTheme.shapes.medium,
                     onClick = onRestore,
                     enabled = canRestore,
                     modifier = Modifier.testTag("restore_confirm"),

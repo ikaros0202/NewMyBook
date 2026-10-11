@@ -17,7 +17,10 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -31,13 +34,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xinyue.reader.core.domain.model.ReaderPageAnimation
 import com.xinyue.reader.core.domain.model.ReaderSettings
-import com.xinyue.reader.core.domain.model.ReaderTapAction
 import com.xinyue.reader.core.domain.model.ReaderThemePreset
+import com.xinyue.reader.core.ui.XinYueIcons
 
 @Composable
 fun GlobalReaderSettingsRoute(
@@ -106,10 +113,17 @@ internal fun GlobalReaderSettingsScreen(
         topBar = {
             TopAppBar(
                 title = { Text(section.title) },
-                navigationIcon = { TextButton(onClick = ::requestBack) { Text("返回") } },
+                navigationIcon = {
+                    IconButton(onClick = ::requestBack) {
+                        Icon(
+                            painter = painterResource(XinYueIcons.ArrowBack),
+                            contentDescription = stringResource(R.string.reader_ui_back),
+                        )
+                    }
+                },
                 actions = {
                     if (editable) {
-                        TextButton(onClick = onSave, enabled = state.isDirty && !state.saving) { Text("保存") }
+                        TextButton(onClick = onSave, enabled = state.isDirty && !state.saving) { Text("完成") }
                     }
                 },
             )
@@ -192,15 +206,21 @@ internal fun GlobalReaderSettingsScreen(
 
 @Composable
 private fun ReaderPreviewCard(settings: ReaderSettings) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("阅读预览", style = MaterialTheme.typography.labelMedium)
-            Text(
-                "山色入窗，翻开下一页。",
-                fontSize = androidx.compose.ui.unit.TextUnit(settings.fontSizeSp, androidx.compose.ui.unit.TextUnitType.Sp),
-                lineHeight = androidx.compose.ui.unit.TextUnit(settings.fontSizeSp * settings.lineHeightMultiplier, androidx.compose.ui.unit.TextUnitType.Sp),
-            )
-        }
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            "阅读预览",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            "山色入窗，翻开下一页。",
+            modifier = Modifier.padding(start = 12.dp),
+            fontSize = androidx.compose.ui.unit.TextUnit(settings.fontSizeSp, androidx.compose.ui.unit.TextUnitType.Sp),
+            lineHeight = androidx.compose.ui.unit.TextUnit(settings.fontSizeSp * settings.lineHeightMultiplier, androidx.compose.ui.unit.TextUnitType.Sp),
+        )
     }
 }
 
@@ -210,9 +230,11 @@ private fun BehaviorControls(settings: ReaderSettings, onPreview: (ReaderSetting
         Text("翻页动画", style = MaterialTheme.typography.titleMedium)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             ReaderPageAnimation.entries.forEach { animation ->
-                TextButton(onClick = { onPreview(settings.copy(pageAnimation = animation)) }) {
-                    Text(if (settings.pageAnimation == animation) "✓ ${animation.label()}" else animation.label())
-                }
+                ReaderChoiceOption(
+                    label = animation.label(),
+                    selected = settings.pageAnimation == animation,
+                    onClick = { onPreview(settings.copy(pageAnimation = animation)) },
+                )
             }
         }
         GlobalSwitch("阅读时保持亮屏", settings.keepScreenOn, testTag = "global_keep_screen") {
@@ -220,22 +242,15 @@ private fun BehaviorControls(settings: ReaderSettings, onPreview: (ReaderSetting
         }
         GlobalSwitch("音量键翻页", settings.volumeKeyPageTurn) { onPreview(settings.copy(volumeKeyPageTurn = it)) }
         Text("九宫格点击", style = MaterialTheme.typography.titleMedium)
-        repeat(3) { row ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                repeat(3) { column ->
-                    val index = row * 3 + column
-                    val action = settings.tapZoneActions.getOrElse(index) { ReaderSettings.DEFAULT_TAP_ZONE_ACTIONS[index] }
-                    Button(
-                        onClick = {
-                            val actions = settings.tapZoneActions.toMutableList()
-                            actions[index] = action.next()
-                            onPreview(settings.copy(tapZoneActions = actions))
-                        },
-                        modifier = Modifier.weight(1f).heightIn(min = 52.dp),
-                    ) { Text(action.label(), maxLines = 1) }
-                }
-            }
-        }
+        Text(
+            text = stringResource(R.string.reader_tap_mapping_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        ReaderTapZoneGrid(
+            actions = settings.tapZoneActions,
+            onActionsChange = { onPreview(settings.copy(tapZoneActions = it)) },
+        )
     }
 }
 
@@ -278,17 +293,20 @@ private fun FontManagement(
     var pendingRemoval by remember { mutableStateOf<com.xinyue.reader.core.domain.model.ImportedFont?>(null) }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("字体文件会校验后复制到应用私有目录；原文件不会被修改。")
-        Button(onClick = onImport, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text("选择字体文件") }
+        TextButton(onClick = onImport, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+            Text("选择字体文件")
+        }
         if (state.importedFonts.isEmpty()) Text("尚未导入字体", color = MaterialTheme.colorScheme.onSurfaceVariant)
         state.importedFonts.forEach { font ->
-            Card(Modifier.fillMaxWidth()) {
-                Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(font.displayName, style = MaterialTheme.typography.titleMedium)
-                        Text("${font.sizeBytes / 1024} KiB", style = MaterialTheme.typography.bodySmall)
-                    }
-                    TextButton(onClick = { pendingRemoval = font }) { Text("删除") }
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 52.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(font.displayName, style = MaterialTheme.typography.titleMedium)
+                    Text("${font.sizeBytes / 1024} KiB", style = MaterialTheme.typography.bodySmall)
                 }
+                TextButton(onClick = { pendingRemoval = font }) { Text("删除") }
             }
         }
     }
@@ -322,27 +340,37 @@ private fun ThemeManagement(
     onUpdateSchedule: (com.xinyue.reader.core.domain.model.ReaderThemeSchedule) -> Unit,
 ) {
     var dialog by remember { mutableStateOf<ThemeDialog?>(null) }
+    val activeAppearance = ReaderSettings().applyAppearanceFrom(state.draft)
+    val activeThemeId = state.themes
+        .firstOrNull { ReaderSettings().applyAppearanceFrom(it.settings) == activeAppearance }
+        ?.id
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("主题", style = MaterialTheme.typography.titleMedium)
         state.themes.forEach { theme ->
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp)) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text(theme.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                        TextButton(onClick = { onApply(theme.id) }) { Text("应用") }
-                    }
-                    FlowRow {
-                        TextButton(onClick = { dialog = ThemeDialog.Copy(theme) }) { Text("复制") }
-                        if (!theme.builtIn) {
-                            TextButton(onClick = { dialog = ThemeDialog.Rename(theme) }) { Text("重命名") }
-                            TextButton(onClick = { onUpdate(theme.id) }) { Text("更新为当前外观") }
-                            TextButton(onClick = { dialog = ThemeDialog.Delete(theme) }) { Text("删除") }
-                        }
-                    }
-                }
+            val renameAction: (() -> Unit)? = if (theme.builtIn) null else {
+                { dialog = ThemeDialog.Rename(theme) }
             }
+            val updateAction: (() -> Unit)? = if (theme.builtIn) null else {
+                { onUpdate(theme.id) }
+            }
+            val deleteAction: (() -> Unit)? = if (theme.builtIn) null else {
+                { dialog = ThemeDialog.Delete(theme) }
+            }
+            ReaderThemeRow(
+                theme = theme,
+                selected = theme.id == activeThemeId,
+                onApply = { onApply(theme.id) },
+                onCopy = { dialog = ThemeDialog.Copy(theme) },
+                onRename = renameAction,
+                onUpdate = updateAction,
+                onDelete = deleteAction,
+            )
         }
-        Button(onClick = { dialog = ThemeDialog.Create }, modifier = Modifier.fillMaxWidth()) { Text("新建当前外观主题") }
+        TextButton(
+            onClick = { dialog = ThemeDialog.Create },
+            modifier = Modifier.heightIn(min = 48.dp),
+            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
+        ) { Text("新建当前外观主题") }
         Text("自动切换", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
         ReaderThemeScheduleControls(
             schedule = state.schedule,
@@ -391,18 +419,4 @@ private fun ReaderPageAnimation.label() = when (this) {
     ReaderPageAnimation.SLIDE -> "滑动"
     ReaderPageAnimation.COVER -> "覆盖"
     ReaderPageAnimation.NONE -> "无动画"
-}
-
-private fun ReaderTapAction.label() = when (this) {
-    ReaderTapAction.PREVIOUS_PAGE -> "上一页"
-    ReaderTapAction.NEXT_PAGE -> "下一页"
-    ReaderTapAction.MENU -> "菜单"
-    ReaderTapAction.NONE -> "无动作"
-}
-
-private fun ReaderTapAction.next() = when (this) {
-    ReaderTapAction.PREVIOUS_PAGE -> ReaderTapAction.NEXT_PAGE
-    ReaderTapAction.NEXT_PAGE -> ReaderTapAction.MENU
-    ReaderTapAction.MENU -> ReaderTapAction.NONE
-    ReaderTapAction.NONE -> ReaderTapAction.PREVIOUS_PAGE
 }

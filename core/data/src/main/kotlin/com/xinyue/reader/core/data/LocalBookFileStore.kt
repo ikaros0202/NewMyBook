@@ -140,13 +140,28 @@ class LocalBookFileStore(
         Unit
     }
 
-    override suspend fun remove(stored: StoredBookFiles) = withContext(ioDispatcher) {
+    override suspend fun remove(stored: StoredBookFiles, preserveCover: Boolean, ownerBookId: String?) = withContext(ioDispatcher) {
         val originalDirectory = requireNotNull(safeResolve(root, stored.originalPath).parentFile)
         val normalizedDirectory = requireNotNull(safeResolve(root, stored.normalizedPath).parentFile)
         require(originalDirectory == normalizedDirectory) { "书籍私有文件路径不一致" }
-        require(originalDirectory.toPath().startsWith(booksRoot.toPath())) { "非法书籍私有目录" }
-        if (originalDirectory.exists() && !originalDirectory.deleteRecursively()) {
-            throw IOException("无法清理书籍私有文件，稍后将自动重试")
+        require(originalDirectory != booksRoot && originalDirectory.toPath().startsWith(booksRoot.toPath())) { "非法书籍私有目录" }
+        if (preserveCover) {
+            // Replacement publishes a new text generation; the stable book's cover remains in place.
+            listOf(stored.originalPath, stored.normalizedPath).map { safeResolve(root, it) }
+                .plus(originalDirectory.resolve(OFFSET_INDEX_FILE_NAME)).forEach { file ->
+                    if (file.exists() && !file.delete()) throw IOException("无法清理旧正文文件")
+                }
+            if (originalDirectory.listFiles()?.isEmpty() == true) originalDirectory.delete()
+        } else {
+            val ownerDirectory = ownerBookId?.let {
+                require(it.matches(Regex("[A-Za-z0-9_-]{1,128}"))) { "非法书籍 ID" }
+                safeResolve(booksRoot, it)
+            }
+            listOfNotNull(originalDirectory, ownerDirectory).distinct().forEach { directory ->
+                if (directory.exists() && !directory.deleteRecursively()) {
+                    throw IOException("无法清理书籍私有文件，稍后将自动重试")
+                }
+            }
         }
         Unit
     }

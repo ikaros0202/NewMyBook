@@ -5,11 +5,11 @@ import androidx.annotation.DrawableRes
 object XinYueIcons {
     @DrawableRes val HomeOutlined = R.drawable.ic_home_outlined
     @DrawableRes val HomeSelected = R.drawable.ic_home_rounded
-    @DrawableRes val LibraryOutlined = R.drawable.ic_local_library_outlined
-    @DrawableRes val LibrarySelected = R.drawable.ic_local_library_rounded
+    @DrawableRes val LibraryOutlined = R.drawable.ic_books_outline
+    @DrawableRes val LibrarySelected = R.drawable.ic_books_outline
     @DrawableRes val SettingsOutlined = R.drawable.ic_settings_outlined
     @DrawableRes val SettingsSelected = R.drawable.ic_settings_rounded
-    @DrawableRes val Library = R.drawable.ic_local_library_rounded
+    @DrawableRes val Library = R.drawable.ic_books_outline
     @DrawableRes val Add = R.drawable.ic_add_rounded
     @DrawableRes val Search = R.drawable.ic_search_rounded
     @DrawableRes val Sort = R.drawable.ic_sort_rounded
@@ -26,6 +26,7 @@ object XinYueIcons {
     @DrawableRes val Typography = R.drawable.ic_format_line_spacing_rounded
     @DrawableRes val Behavior = R.drawable.ic_touch_app_rounded
     @DrawableRes val Information = R.drawable.ic_info_rounded
+    @DrawableRes val Statistics = R.drawable.ic_statistics_rounded
     @DrawableRes val Backup = R.drawable.ic_backup_rounded
     @DrawableRes val BookmarkOutlined = R.drawable.ic_bookmark_border_rounded
     @DrawableRes val BookmarkSelected = R.drawable.ic_bookmark_rounded

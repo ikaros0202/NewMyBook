@@ -275,6 +275,9 @@ class V16StructuredTxtInstrumentedTest {
         assertReachable48dp("library-layout-list")
         composeRule.onNodeWithTag("library-layout-list", useUnmergedTree = true).performClick()
         composeRule.onNodeWithTag("library-layout-button").performClick()
+        composeRule.onNodeWithTag("library-density-compact").assertDoesNotExist()
+        composeRule.onNodeWithTag("library-layout-grid").performClick()
+        composeRule.onNodeWithTag("library-layout-button").performClick()
         assertReachable48dp("library-density-compact")
         composeRule.onNodeWithTag("library-density-compact", useUnmergedTree = true).performClick()
 

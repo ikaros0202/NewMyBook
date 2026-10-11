@@ -15,6 +15,9 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasScrollToIndexAction
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -106,7 +109,7 @@ class ReaderV14MenuTest {
 
         compose.onNodeWithContentDescription("更多阅读操作").performClick()
         compose.onNodeWithText("目录管理").assertIsDisplayed()
-        compose.onNodeWithText("定位进度").assertIsDisplayed()
+        compose.onNodeWithText("跳转位置").assertIsDisplayed()
         compose.onNodeWithText("触控锁").assertIsDisplayed()
     }
 
@@ -170,6 +173,57 @@ class ReaderV14MenuTest {
         compose.onNodeWithText("第二章").assertIsDisplayed()
         compose.onNodeWithText("书签").performClick()
         compose.onNodeWithText("当前书籍还没有书签", substring = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun directoryLocateCurrentChapterWorksAfterClearingSearchAndWhenAlreadyEmpty() {
+        val chapters = (1..80).map { number ->
+            DetectedChapter("第${number}章", (number - 1) * 100)
+        }
+        val currentChapter = chapters[1]
+        val currentChapterItem = hasTestTag("reader-directory-chapter") and
+            hasText(currentChapter.title)
+
+        compose.setContent {
+            MaterialTheme {
+                ReaderNavigationDrawer(
+                    bookTitle = "公开样例",
+                    chapters = chapters,
+                    bookmarks = emptyList(),
+                    anchorOffset = currentChapter.startOffset,
+                    content = "公开正文",
+                    contentStartOffset = 0,
+                    initialTab = ReaderNavigationTab.CHAPTERS,
+                    onTabChanged = {},
+                    onSelectChapter = {},
+                    onSelectBookmark = {},
+                    onDeleteBookmark = {},
+                    onDismiss = {},
+                )
+            }
+        }
+
+        compose.onNode(currentChapterItem).assertIsDisplayed()
+
+        fun scrollDirectoryTo(index: Int) {
+            compose.onNode(hasScrollToIndexAction())
+                .performSemanticsAction(SemanticsActions.ScrollToIndex) { scrollToIndex ->
+                    scrollToIndex(index)
+                }
+        }
+
+        scrollDirectoryTo(chapters.lastIndex)
+        compose.onAllNodes(currentChapterItem).assertCountEquals(0)
+
+        compose.onNodeWithTag("reader-directory-search")
+            .performTextInput(chapters.last().title)
+        compose.onNodeWithContentDescription("定位当前章节").performClick()
+        compose.onNode(currentChapterItem).assertIsDisplayed()
+
+        scrollDirectoryTo(chapters.lastIndex)
+        compose.onAllNodes(currentChapterItem).assertCountEquals(0)
+        compose.onNodeWithContentDescription("定位当前章节").performClick()
+        compose.onNode(currentChapterItem).assertIsDisplayed()
     }
 
     @Test
@@ -279,7 +333,8 @@ class ReaderV14MenuTest {
 
         compose.onNodeWithText("导出批注").performClick()
         compose.onNodeWithText("包含书签").performClick()
-        compose.onNodeWithText("导出 JSON").performClick()
+        compose.onNodeWithText("JSON").performClick()
+        compose.onNodeWithTag("reader-annotation-export-confirm").performClick()
 
         assertTrue(chosenFormat == AnnotationExportFormat.JSON)
         assertTrue(includeBookmarks)

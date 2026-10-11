@@ -25,6 +25,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.xinyue.reader.core.ui.XinYueIcons
@@ -42,11 +44,11 @@ enum class SettingsEntry(
 ) {
     APPEARANCE("全局阅读外观", "字体、字号、行高、边距、配色与亮度", SettingsSection.COMMON_READING),
     THEMES("主题与自动切换", "主题管理、跟随系统与固定时段", SettingsSection.PERSONALIZATION),
-    FONTS("导入字体", "导入、查看与删除应用私有字体", SettingsSection.PERSONALIZATION),
+    FONTS("导入字体", "添加和管理喜欢的字体", SettingsSection.PERSONALIZATION),
     TYPOGRAPHY("精细排版与专注带", "字重、字距、段落、自定义颜色与专注带", SettingsSection.PERSONALIZATION),
     BEHAVIOR("阅读行为", "翻页动画、保持亮屏、音量键与点击区域", SettingsSection.COMMON_READING),
     INFORMATION("阅读信息", "书名、章名、页码、进度、时间与电量", SettingsSection.INFORMATION_LOCAL),
-    BACKUP("备份与恢复", "本地导出、检查、预览与恢复", SettingsSection.INFORMATION_LOCAL),
+    BACKUP("备份与恢复", "保存书架，或接着另一台设备阅读", SettingsSection.INFORMATION_LOCAL),
 }
 
 private val SettingsEntry.iconRes: Int
@@ -65,6 +67,7 @@ private val SettingsEntry.iconRes: Int
 fun SettingsScreen(onOpenEntry: (SettingsEntry) -> Unit) {
     Scaffold(
         modifier = Modifier.testTag("settings_root"),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = { TopAppBar(title = { Text("设置") }) },
     ) { padding ->
@@ -74,7 +77,7 @@ fun SettingsScreen(onOpenEntry: (SettingsEntry) -> Unit) {
                 .padding(padding)
                 .testTag("settings_list"),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             items(SettingsSection.entries, key = SettingsSection::name) { section ->
                 SettingsGroup(
@@ -100,9 +103,13 @@ private fun SettingsGroup(
         Text(
             text = section.title,
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(horizontal = 4.dp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 4.dp).semantics { heading() },
         )
+        Surface(
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.surface,
+        ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             entries.forEachIndexed { index, entry ->
                 SettingsRow(entry = entry, onClick = { onOpenEntry(entry) })
@@ -113,6 +120,7 @@ private fun SettingsGroup(
                     )
                 }
             }
+        }
         }
     }
 }
@@ -138,10 +146,10 @@ private fun SettingsRow(entry: SettingsEntry, onClick: () -> Unit) {
                 painter = painterResource(entry.iconRes),
                 contentDescription = null,
                 modifier = Modifier.size(24.dp),
-                tint = MaterialTheme.colorScheme.primary,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(entry.title, style = MaterialTheme.typography.titleSmall)
+                Text(entry.title, style = MaterialTheme.typography.bodyLarge)
                 Text(
                     entry.summary,
                     style = MaterialTheme.typography.bodySmall,

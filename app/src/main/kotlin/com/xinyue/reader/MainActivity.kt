@@ -24,6 +24,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -94,7 +95,7 @@ internal enum class MainTab(
     @DrawableRes val selectedIconRes: Int,
 ) {
     LIBRARY("书架", XinYueIcons.LibraryOutlined, XinYueIcons.LibrarySelected),
-    STATISTICS("统计", XinYueIcons.Information, XinYueIcons.Information),
+    STATISTICS("统计", XinYueIcons.Statistics, XinYueIcons.Statistics),
     SETTINGS("设置", XinYueIcons.SettingsOutlined, XinYueIcons.SettingsSelected),
     ;
 
@@ -178,7 +179,14 @@ private fun XinYueApp(
                     }
                 }
             }
-            entry<ImportDestination> { ImportRoute(onBack = { backStack.removeLastOrNull() }) }
+            entry<ImportDestination> {
+                ImportRoute(
+                    onBack = { backStack.removeLastOrNull() },
+                    onOpenBook = { bookId ->
+                        backStack.add(ReaderDestination(bookId))
+                    },
+                )
+            }
             entry<BackupDestination> { BackupRoute(onBack = { backStack.removeLastOrNull() }) }
             entry<ReaderDestination> { destination ->
                 ReaderRoute(
@@ -339,14 +347,22 @@ private fun MainFloatingNavigationItem(
             MaterialTheme.colorScheme.onSurfaceVariant
         },
     ) {
-        androidx.compose.foundation.layout.Box(
+        Column(
             modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(
+                4.dp,
+                Alignment.CenterVertically,
+            ),
         ) {
             Icon(
                 painter = painterResource(tab.iconRes(selected)),
                 contentDescription = null,
                 modifier = Modifier.size(24.dp),
+            )
+            androidx.compose.material3.Text(
+                text = tab.contentDescription,
+                style = MaterialTheme.typography.labelMedium,
             )
         }
     }

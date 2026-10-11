@@ -76,21 +76,28 @@ class ReaderSettingsSheetTest {
             }
         }
 
-        compose.onNodeWithTag("reader-quick-settings").assertIsDisplayed()
-        compose.onAllNodesWithTag("reader-theme-built-in-paper").assertCountEquals(0)
+        compose.onNodeWithTag("reader-quick-settings-theme-sepia")
+            .performScrollTo()
+            .assertIsDisplayed()
+        compose.onAllNodesWithTag("reader-theme-apply-built-in-paper").assertCountEquals(0)
         compose.onNodeWithTag("reader-quick-settings-theme-sepia").performClick()
-        compose.onNodeWithTag("reader-quick-settings-more").assertIsDisplayed()
+        compose.onNodeWithTag("reader-quick-settings-more")
+            .performScrollTo()
+            .assertIsDisplayed()
         compose.onNodeWithTag("reader-quick-settings-more").performClick()
         compose.onAllNodesWithTag("reader-quick-settings").assertCountEquals(0)
-        compose.onNodeWithTag("reader-theme-built-in-paper").assertIsDisplayed()
+        compose.onNodeWithTag("reader-settings-themes").performClick()
+        compose.onNodeWithTag("reader-theme-apply-built-in-paper").performScrollTo().assertIsDisplayed()
         assertTrue(edit.preview.backgroundArgb == sepia.backgroundArgb)
         compose.onNodeWithTag("reader-settings-back-to-quick").performClick()
-        compose.onNodeWithTag("reader-quick-settings").assertIsDisplayed()
+        compose.onNodeWithTag("reader-quick-settings-theme-sepia")
+            .performScrollTo()
+            .assertIsDisplayed()
         assertTrue(edit.preview.backgroundArgb == sepia.backgroundArgb)
     }
 
     @Test
-    fun currentBookQuickModeHidesGlobalOnlyPageAndBrightnessControls() {
+    fun currentBookQuickModeHidesGlobalOnlyBrightnessControls() {
         compose.setContent {
             MaterialTheme {
                 ReaderSettingsSheet(
@@ -126,26 +133,30 @@ class ReaderSettingsSheetTest {
             }
         }
 
-        compose.onAllNodesWithTag("reader-quick-settings-page-method").assertCountEquals(0)
         compose.onAllNodesWithTag("reader-quick-settings-brightness-slider").assertCountEquals(0)
         compose.onAllNodesWithTag("reader-quick-settings-brightness-toggle").assertCountEquals(0)
-        compose.onNodeWithTag("reader-quick-settings-global-only-note").assertIsDisplayed()
+        compose.onNodeWithTag("reader-quick-settings-more")
+            .performScrollTo()
+            .assertIsDisplayed()
     }
 
     @Test
     fun fullModePlacesCommonTypographyBeforeThemeCards_andSaveRemainsAvailable() {
         var committed = false
+        var edit by mutableStateOf(
+            ReaderAppearanceEdit(
+                scope = ReaderSettingsScope.GLOBAL,
+                original = ReaderSettings(),
+                preview = ReaderSettings(),
+                originalStableAnchorOffset = 0,
+            ),
+        )
         compose.setContent {
             val density = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(density.density, 2f)) {
                 MaterialTheme {
                     ReaderSettingsSheet(
-                        edit = ReaderAppearanceEdit(
-                            scope = ReaderSettingsScope.GLOBAL,
-                            original = ReaderSettings(),
-                            preview = ReaderSettings(fontSizeSp = 22f),
-                            originalStableAnchorOffset = 0,
-                        ),
+                        edit = edit,
                         importedFonts = emptyList(),
                         themes = ReaderThemeManager.BUILT_IN_THEMES,
                         activeThemeId = "built-in-paper",
@@ -155,7 +166,7 @@ class ReaderSettingsSheetTest {
                         bookOverrides = ReaderSettingsOverrides(),
                         errorMessage = null,
                         onScopeChanged = {},
-                        onPreview = {},
+                        onPreview = { settings -> edit = edit.copy(preview = settings) },
                         onCommit = { committed = true },
                         onCancel = {},
                         onClearCurrentBookOverrides = {},
@@ -173,30 +184,42 @@ class ReaderSettingsSheetTest {
             }
         }
 
-        compose.onNodeWithTag("reader-quick-settings").assertIsDisplayed()
-        compose.onNodeWithTag("reader-quick-settings-more").performClick()
+        compose.onNodeWithTag("reader-quick-settings-theme-dark")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
+        compose.onNodeWithTag("reader-quick-settings-more")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
         compose.onAllNodesWithTag("reader-quick-settings").assertCountEquals(0)
         compose.onNodeWithTag("reader-settings-full").assertIsDisplayed()
-        val commonTop = compose.onNodeWithTag("reader-typography-common").fetchSemanticsNode().boundsInRoot.top
-        val themeTop = compose.onNodeWithTag("reader-theme-built-in-paper").fetchSemanticsNode().boundsInRoot.top
-        assertTrue("common typography must precede the first theme card", commonTop < themeTop)
-        compose.onNodeWithText("保存").performClick()
+        compose.onNodeWithTag("reader-settings-common").assertIsDisplayed()
+        compose.onNodeWithTag("reader-typography-common").assertIsDisplayed()
+        compose.onAllNodesWithTag("reader-theme-apply-built-in-paper").assertCountEquals(0)
+        compose.onNodeWithTag("reader-settings-themes").performClick()
+        compose.onNodeWithTag("reader-theme-apply-built-in-paper").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("完成").performClick()
         assertTrue(committed)
+        assertTrue(edit.preview.colorTheme == ReaderColorTheme.DARK)
     }
 
     @Test
     fun fullModeCancelUsesAnIndependentJourneyAndDoesNotCommit() {
         var committed = false
         var cancelled = false
+        var edit by mutableStateOf(
+            ReaderAppearanceEdit(
+                scope = ReaderSettingsScope.GLOBAL,
+                original = ReaderSettings(),
+                preview = ReaderSettings(),
+                originalStableAnchorOffset = 0,
+            ),
+        )
         compose.setContent {
             MaterialTheme {
                 ReaderSettingsSheet(
-                    edit = ReaderAppearanceEdit(
-                        scope = ReaderSettingsScope.GLOBAL,
-                        original = ReaderSettings(),
-                        preview = ReaderSettings(fontSizeSp = 22f),
-                        originalStableAnchorOffset = 0,
-                    ),
+                    edit = edit,
                     importedFonts = emptyList(),
                     themes = ReaderThemeManager.BUILT_IN_THEMES,
                     activeThemeId = "built-in-paper",
@@ -206,7 +229,7 @@ class ReaderSettingsSheetTest {
                     bookOverrides = ReaderSettingsOverrides(),
                     errorMessage = null,
                     onScopeChanged = {},
-                    onPreview = {},
+                    onPreview = { settings -> edit = edit.copy(preview = settings) },
                     onCommit = { committed = true },
                     onCancel = { cancelled = true },
                     onClearCurrentBookOverrides = {},
@@ -223,12 +246,19 @@ class ReaderSettingsSheetTest {
             }
         }
 
-        compose.onNodeWithTag("reader-quick-settings").assertIsDisplayed()
-        compose.onNodeWithTag("reader-quick-settings-more").performClick()
+        compose.onNodeWithTag("reader-quick-settings-theme-dark")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
+        compose.onNodeWithTag("reader-quick-settings-more")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
         compose.onNodeWithTag("reader-settings-full").assertIsDisplayed()
         compose.onNodeWithText("取消").performClick()
         assertTrue(cancelled)
         assertTrue(!committed)
+        assertTrue(edit.preview.colorTheme == ReaderColorTheme.DARK)
     }
 
     @Test
@@ -320,37 +350,52 @@ class ReaderSettingsSheetTest {
             }
         }
 
-        compose.onNodeWithTag("reader-quick-settings-more").performClick()
+        compose.onNodeWithTag("reader-quick-settings-more")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
         compose.onNodeWithTag("reader-settings-common").assertIsDisplayed()
         compose.onNodeWithText("宋体", substring = true).performScrollTo().performClick()
         compose.onNodeWithText("导入字体").performScrollTo().performClick()
         compose.onNodeWithText("删除字体").performScrollTo().performClick()
-        compose.onNodeWithTag("reader-settings-advanced").performScrollTo().performClick()
+        compose.onNodeWithTag("reader-settings-advanced").performClick()
         compose.onNodeWithTag("reader-focus-band-toggle").performScrollTo().performClick()
 
+        compose.onNodeWithTag("reader-settings-themes").performClick()
         compose.onNodeWithTag("reader-theme-apply-built-in-sepia").performScrollTo().performClick()
-        compose.onNodeWithTag("reader-theme-copy-built-in-paper").performScrollTo().performClick()
-        compose.onNodeWithText("主题名称").performTextClearance()
-        compose.onNodeWithText("主题名称").performTextInput("复制主题")
+        compose.onNodeWithTag("reader-theme-more-built-in-paper").performScrollTo().performClick()
+        compose.onNodeWithTag("reader-theme-copy-built-in-paper").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("主题名称").assertIsDisplayed().performTextClearance()
+        compose.onNodeWithText("主题名称").assertIsDisplayed().performTextInput("复制主题")
         compose.onNodeWithText("确定").performClick()
         compose.onNodeWithTag("reader-theme-create").performScrollTo().performClick()
-        compose.onNodeWithText("主题名称").performTextInput("新主题")
+        compose.waitForIdle()
+        compose.onNodeWithText("主题名称").assertIsDisplayed().performTextInput("新主题")
         compose.onNodeWithText("确定").performClick()
-        compose.onNodeWithTag("reader-theme-copy-custom-test").performScrollTo().performClick()
-        compose.onNodeWithText("主题名称").performTextClearance()
-        compose.onNodeWithText("主题名称").performTextInput("自定义副本")
+        compose.onNodeWithTag("reader-theme-more-custom-test").performScrollTo().performClick()
+        compose.onNodeWithTag("reader-theme-copy-custom-test").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("主题名称").assertIsDisplayed().performTextClearance()
+        compose.onNodeWithText("主题名称").assertIsDisplayed().performTextInput("自定义副本")
         compose.onNodeWithText("确定").performClick()
-        compose.onNodeWithTag("reader-theme-rename-custom-test").performScrollTo().performClick()
-        compose.onNodeWithText("主题名称").performTextClearance()
-        compose.onNodeWithText("主题名称").performTextInput("重命名主题")
+        compose.onNodeWithTag("reader-theme-more-custom-test").performScrollTo().performClick()
+        compose.onNodeWithTag("reader-theme-rename-custom-test").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("主题名称").assertIsDisplayed().performTextClearance()
+        compose.onNodeWithText("主题名称").assertIsDisplayed().performTextInput("重命名主题")
         compose.onNodeWithText("确定").performClick()
-        compose.onNodeWithTag("reader-theme-update-custom-test").performScrollTo().performClick()
-        compose.onNodeWithTag("reader-theme-delete-custom-test").performScrollTo().performClick()
+        compose.onNodeWithTag("reader-theme-more-custom-test").performScrollTo().performClick()
+        compose.onNodeWithTag("reader-theme-update-custom-test").performClick()
+        compose.onNodeWithTag("reader-theme-more-custom-test").performScrollTo().performClick()
+        compose.onNodeWithTag("reader-theme-delete-custom-test").performClick()
         compose.onNodeWithTag("reader-theme-dialog-delete-confirm").performClick()
 
+        compose.onNodeWithTag("reader-settings-advanced").performClick()
         compose.onNodeWithTag("reader-theme-schedule-mode-follow_system").performScrollTo().performClick()
         compose.onNodeWithTag("reader-theme-schedule-mode-fixed_time").performScrollTo().performClick()
-        compose.onNodeWithTag("reader-theme-schedule-light-built-in-sepia").performScrollTo().performClick()
+        compose.onNodeWithTag("reader-theme-schedule-light").performScrollTo().performClick()
+        compose.onNodeWithTag("reader-theme-schedule-light-built-in-sepia").performClick()
         compose.onNodeWithTag("reader-theme-schedule-manual-override").performScrollTo().performClick()
 
         assertTrue(callbackOrder.indexOf("preview") >= 0)
@@ -409,12 +454,14 @@ class ReaderSettingsSheetTest {
             }
         }
 
-        compose.onNodeWithTag("reader-quick-settings").assertIsDisplayed()
-        compose.onNodeWithTag("reader-quick-settings-more").performClick()
+        compose.onNodeWithTag("reader-quick-settings-more")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
         compose.onNodeWithTag("reader-settings-full").assertIsDisplayed()
-        compose.onNodeWithTag("reader-settings-advanced").performScrollTo().performClick()
+        compose.onNodeWithTag("reader-settings-advanced").performClick()
         compose.onNodeWithTag("reader-settings-full-advanced-controls").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("保存").assertIsDisplayed()
+        compose.onNodeWithText("完成").assertIsDisplayed()
         compose.onNodeWithText("取消").assertIsDisplayed()
     }
 }

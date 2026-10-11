@@ -10,6 +10,8 @@ enum class RestorePhase {
     VERIFIED,
     CLEANUP_PENDING,
     COMPLETED,
+    ROLLBACK_PENDING,
+    ROLLED_BACK,
 }
 
 @Serializable

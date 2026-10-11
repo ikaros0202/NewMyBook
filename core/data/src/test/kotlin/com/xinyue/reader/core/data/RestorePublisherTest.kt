@@ -14,6 +14,11 @@ import com.xinyue.reader.core.domain.model.RestoreResult
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Rule
 import org.junit.Test
@@ -21,6 +26,24 @@ import org.junit.rules.TemporaryFolder
 
 class RestorePublisherTest {
     @get:Rule val temporaryFolder = TemporaryFolder()
+
+    @Test
+    fun `path only database changes are compensated immediately and on startup`() = runTest {
+        for (failRollback in listOf(false, true)) {
+            val fixture = fixture("path-only-$failRollback", RestoreFaultPoint.AFTER_DATABASE_COMMIT, pathOnlyChange = true)
+            fixture.database.failRollbackOnce = failRollback
+            assertThat(BackupCatalogDigest.sha256(fixture.oldCatalog)).isEqualTo(BackupCatalogDigest.sha256(fixture.newCatalog))
+            fixture.publisher.publish(fixture.prepared, fixture.request)
+            if (failRollback) {
+                RestoreRecovery(
+                    fixture.root, fixture.database, RestorePlanResolver { _, _ -> error("must roll back") },
+                    fixture.journals, RestoreSnapshotStore(fixture.root), StagedRestorePlanRegistry(),
+                ).reconcile()
+            }
+            assertThat(fixture.database.state.bookSources).isEqualTo(fixture.oldCatalog.bookSources)
+            assertThat(fixture.journals.list()).isEmpty()
+        }
+    }
 
     @Test
     fun `every pre-verification failure converges to exact old database and file state`() = runTest {
@@ -48,6 +71,50 @@ class RestorePublisherTest {
             assertThat(File(fixture.root, "restore-snapshots").listFiles().orEmpty()).isEmpty()
             assertThat(fixture.prepared.staged.stagingRoot.exists()).isFalse()
         }
+    }
+
+    @Test
+    fun `failed database compensation retains evidence and startup retries the rollback`() = runTest {
+        val fixture = fixture("rollback-retry", RestoreFaultPoint.AFTER_DATABASE_COMMIT)
+        fixture.database.failRollbackOnce = true
+
+        val result = fixture.publisher.publish(fixture.prepared, fixture.request)
+
+        assertThat(result).isInstanceOf(RestoreResult.Failure::class.java)
+        assertThat((result as RestoreResult.Failure).error.message).contains("回滚资料已保留")
+        assertThat(fixture.database.state).isEqualTo(fixture.newCatalog)
+        assertThat(fixture.target.readText()).isEqualTo("new-public-content")
+        assertThat(fixture.journals.read("operation-1")!!.phase).isEqualTo(RestorePhase.ROLLBACK_PENDING)
+        assertThat(fixture.prepared.staged.stagingRoot.exists()).isTrue()
+        assertThat(File(fixture.root, "restore-snapshots/operation-1/snapshot.json").isFile).isTrue()
+
+        val recovery = RestoreRecovery(
+            fixture.root, fixture.database, RestorePlanResolver { _, _ -> error("must roll back") },
+            fixture.journals, RestoreSnapshotStore(fixture.root), StagedRestorePlanRegistry(),
+        )
+        recovery.reconcile()
+        recovery.reconcile()
+
+        assertThat(fixture.database.state).isEqualTo(fixture.oldCatalog)
+        assertThat(fixture.target.readText()).isEqualTo("old-public-content")
+        assertThat(fixture.journals.list()).isEmpty()
+    }
+
+    @Test
+    fun `cancellation after database commit compensates in a non cancellable context`() = runTest {
+        lateinit var publishing: Job
+        val fixture = fixture("cancel-commit", onFault = { point ->
+            if (point == RestoreFaultPoint.AFTER_DATABASE_COMMIT) {
+                publishing.cancel()
+                throw CancellationException("cancelled restore")
+            }
+        })
+        publishing = launch { fixture.publisher.publish(fixture.prepared, fixture.request) }
+        publishing.join()
+
+        assertThat(fixture.database.state).isEqualTo(fixture.oldCatalog)
+        assertThat(fixture.target.readText()).isEqualTo("old-public-content")
+        assertThat(fixture.journals.list()).isEmpty()
     }
 
     @Test
@@ -96,6 +163,8 @@ class RestorePublisherTest {
         name: String,
         fault: RestoreFaultPoint? = null,
         deleteOldAsset: Boolean = false,
+        onFault: (RestoreFaultPoint) -> Unit = {},
+        pathOnlyChange: Boolean = false,
     ): Fixture {
         val root = temporaryFolder.newFolder("private-$name")
         val target = File(root, "books/book-1/content.txt").also { it.parentFile!!.mkdirs(); it.writeText("old-public-content") }
@@ -112,8 +181,10 @@ class RestorePublisherTest {
             entries = listOf(BackupManifestEntry(sourcePath, BackupEntryKind.NORMALIZED_TEXT, source.length(), hash)),
         )
         val archive = File(stagingRoot, "archive.xinyuebackup").also { it.writeText("archive") }
-        val oldCatalog = BackupCatalogSnapshot(globalSettings = BackupGlobalSettingsRecord("{\"fontSizeSp\":20}", "{}", 1))
-        val newCatalog = BackupCatalogSnapshot(globalSettings = BackupGlobalSettingsRecord("{\"fontSizeSp\":30}", "{}", 2))
+        val oldCatalog = BackupCatalogSnapshot(globalSettings = BackupGlobalSettingsRecord("{\"fontSizeSp\":20}", "{}", 1),
+            bookSources = if (pathOnlyChange) listOf(BackupBookSource("book-1", "books/old-generation/original.txt", "books/old-generation/content.txt", "books/old-generation/offsets.xidx", null)) else emptyList())
+        val newCatalog = if (pathOnlyChange) oldCatalog.copy(bookSources = listOf(BackupBookSource("book-1", "books/book-1/original.txt", "books/book-1/content.txt", "books/book-1/offsets.xidx", null)))
+            else BackupCatalogSnapshot(globalSettings = BackupGlobalSettingsRecord("{\"fontSizeSp\":30}", "{}", 2))
         val action = RestoreAssetAction(sourcePath, "books/book-1/content.txt", BackupEntryKind.NORMALIZED_TEXT, source.length(), hash)
         val plan = RestorePlan(
             stagedPlanToken = "operation-1",
@@ -132,7 +203,10 @@ class RestorePublisherTest {
             deleteTargetRelativePaths = if (deleteOldAsset) listOf("books/old-only/content.txt") else emptyList(),
         )
         val database = FakeRestoreDatabaseGateway(oldCatalog, fault)
-        val injector = RestoreFaultInjector { point -> if (point == fault && point != RestoreFaultPoint.DURING_DATABASE_TRANSACTION) throw IOException("injected $point") }
+        val injector = RestoreFaultInjector { point ->
+            onFault(point)
+            if (point == fault && point != RestoreFaultPoint.DURING_DATABASE_TRANSACTION) throw IOException("injected $point")
+        }
         val journals = RestoreJournalStore(root)
         val publisher = RestorePublisher(
             privateRoot = root,
@@ -150,12 +224,18 @@ class RestorePublisherTest {
         MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
     private class FakeRestoreDatabaseGateway(
-        initial: BackupCatalogSnapshot,
+        private val initial: BackupCatalogSnapshot,
         private val fault: RestoreFaultPoint?,
     ) : RestoreDatabaseGateway {
         var state = initial
+        var failRollbackOnce = false
         override suspend fun snapshot(): BackupCatalogSnapshot = state
         override suspend fun replaceAll(snapshot: BackupCatalogSnapshot) {
+            currentCoroutineContext().ensureActive()
+            if (snapshot == initial && failRollbackOnce) {
+                failRollbackOnce = false
+                throw IOException("rollback temporarily unavailable")
+            }
             if (fault == RestoreFaultPoint.DURING_DATABASE_TRANSACTION) throw IOException("transaction rolled back")
             state = snapshot
         }

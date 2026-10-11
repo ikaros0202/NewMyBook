@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="reader_ui_back">返回</string>
+    <string name="reader_ui_custom_theme">自定义主题</string>
+</resources>

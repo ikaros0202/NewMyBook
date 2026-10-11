@@ -13,6 +13,8 @@ import com.google.common.truth.Truth.assertThat
 import com.xinyue.reader.core.domain.model.HighlightColor
 import com.xinyue.reader.core.domain.model.ReaderFocusBandSettings
 import com.xinyue.reader.core.domain.model.ReaderTapAction
+import com.xinyue.reader.core.text.ReaderLayoutWhitespaceNormalizer
+import kotlinx.coroutines.test.runTest
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
@@ -182,6 +184,83 @@ class ReaderSelectableTextViewTest {
         assertThat(view.text.toString()).isEqualTo("第一段。\n第二段。")
         assertThat(view.currentSelection())
             .isEqualTo(ReaderSelection(startOffset = 45, endOffset = 48, text = "第二段"))
+    }
+
+    @Test
+    fun `rendered page keeps paginator final line inside the text viewport`() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val rawText = buildString {
+            append("第一章 潮退以后\n")
+            repeat(80) {
+                append("林澄沿着旧港口往前走，潮声在石阶下缓慢回响，远处的灯塔穿过雾气。\n")
+            }
+            append("\n\u3000她正想问路，蓝色仓门忽然从里面打开。")
+        }
+        val layoutText = ReaderLayoutWhitespaceNormalizer.normalize(rawText)
+        val titleEnd = "第一章 潮退以后".length
+        val titleRanges = listOf(ReaderChapterTitleRange(0, titleEnd))
+        val specs = listOf(
+            ReaderLayoutSpec(
+                widthPx = 320,
+                heightPx = 260,
+                fontSizePx = 30f,
+                lineHeightPx = 48f,
+            ),
+            ReaderLayoutSpec(
+                widthPx = 320,
+                heightPx = 260,
+                fontSizePx = 42f,
+                lineHeightPx = 67.2f,
+                paragraphSpacingPx = 12f,
+            ),
+        )
+
+        specs.forEach { spec ->
+            val pages = AndroidTextPaginator().paginateWindowWithTitleRanges(
+                text = layoutText,
+                spec = spec,
+                startOffset = 0,
+                endOffset = layoutText.length,
+                titleRanges = titleRanges,
+            )
+
+            pages.forEach { page ->
+                val pageText = layoutText.substring(page.startOffset, page.endOffset)
+                val sourceText = rawText.substring(page.startOffset, page.endOffset)
+                val view = ReaderSelectableTextView(context).apply {
+                    layoutParams = ViewGroup.LayoutParams(spec.widthPx, spec.heightPx)
+                    pageStartOffset = page.startOffset
+                    applyPresentation(
+                        spec = spec,
+                        contentColorArgb = 0xFF222222.toInt(),
+                        backgroundColorArgb = 0xFFFFFFFF.toInt(),
+                        styledTextFactory = styledTextFactory,
+                    )
+                    showPage(
+                        pageText = pageText,
+                        sourceText = sourceText,
+                        annotations = emptyList(),
+                        spec = spec,
+                        styledTextFactory = styledTextFactory,
+                        firstParagraphIsContinuation = page.startOffset > 0 &&
+                            layoutText[page.startOffset - 1] != '\n',
+                        lastParagraphIsContinuation = page.endOffset < layoutText.length &&
+                            layoutText[page.endOffset - 1] != '\n',
+                        titleRanges = titleRanges,
+                    )
+                }
+                view.measure(
+                    View.MeasureSpec.makeMeasureSpec(spec.widthPx, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(spec.heightPx, View.MeasureSpec.EXACTLY),
+                )
+                view.layout(0, 0, spec.widthPx, spec.heightPx)
+
+                val textLayout = requireNotNull(view.layout)
+                assertThat(textLayout.lineCount).isGreaterThan(0)
+                assertThat(textLayout.getLineBottom(textLayout.lineCount - 1))
+                    .isAtMost(view.height)
+            }
+        }
     }
 
     @Test

@@ -30,6 +30,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'assert-empty-acceptance-device.ps1')
 
 $qaRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $qaRoot '..')).Path
@@ -281,12 +282,11 @@ $commands = @(
     "adb -s $Serial get-state",
     "adb -s $Serial shell getprop ro.build.version.sdk",
     "adb -s $Serial shell getconf PAGE_SIZE or grep -m 1 KernelPageSize /proc/self/smaps",
-    "adb -s $Serial uninstall $packageName",
-    "adb -s $Serial uninstall $testPackageName",
-    "adb -s $Serial install -r `"$($candidate.ApkPath)`"",
+    "verify every Android user has no installed or retained production/test package; otherwise refuse",
+    "adb -s $Serial install `"$($candidate.ApkPath)`"",
     "adb -s $Serial push `"$fixture`" $remoteFixture",
     "adb -s $Serial shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file://$remoteFixture",
-    "adb -s $Serial install -r `"$testApk`"",
+    "adb -s $Serial install `"$testApk`"",
     "configure navigationMode=$NavigationMode windowMode=$WindowMode",
     "adb -s $Serial shell am instrument -w -r -e class $InstrumentationFilter $instrumentationRunner",
     "adb -s $Serial shell am instrument -w -r -e class $windowFilter $instrumentationRunner",
@@ -299,6 +299,7 @@ $commands = @(
     "scan logcat and write `"$fatalScanPath`""
 )
 $finallyCommands = @(
+    'uninstall only production/test packages successfully installed by this run after the empty-device guard passed',
     "adb -s $Serial shell settings put system font_scale <original-font-scale>",
     "adb -s $Serial shell settings put system accelerometer_rotation <original-auto-rotation>",
     "adb -s $Serial shell settings put system user_rotation <original-user-rotation>",
@@ -331,6 +332,7 @@ if ($DryRun) {
     return
 }
 
+Assert-EmptyAcceptanceDevice -InvokeAdb { param($AdbArguments) Invoke-SerialAdb -Arguments $AdbArguments }
 New-Item -ItemType Directory -Path $endpointRoot -Force | Out-Null
 $status = 'FAIL'
 $failure = $null
@@ -344,6 +346,8 @@ $originalWmSize = $null
 $originalWmDensity = $null
 $restorationFailure = $null
 $restoration = $null
+$installedAppByRun = $false
+$installedTestByRun = $false
 
 try {
     $originalFontScale = Get-FirstLine (Invoke-SerialAdb -Arguments @('shell', 'settings', 'get', 'system', 'font_scale'))
@@ -354,9 +358,8 @@ try {
     $originalWmDensity = (Invoke-SerialAdb -Arguments @('shell', 'wm', 'density')).Lines -join '; '
     $originalNavigationOverlay = Get-ActiveNavigationOverlay
 
-    Invoke-SerialAdb -Arguments @('uninstall', $packageName) -AllowFailure | Out-Null
-    Invoke-SerialAdb -Arguments @('uninstall', $testPackageName) -AllowFailure | Out-Null
-    Invoke-SerialAdb -Arguments @('install', '-r', $candidate.ApkPath) | Out-Null
+    Invoke-SerialAdb -Arguments @('install', $candidate.ApkPath) | Out-Null
+    $installedAppByRun = $true
     Invoke-SerialAdb -Arguments @('push', $fixture, $remoteFixture) | Out-Null
     Invoke-SerialAdb -Arguments @('shell', 'touch', $remoteFixture) | Out-Null
     Invoke-SerialAdb -Arguments @(
@@ -368,7 +371,8 @@ try {
     Invoke-SerialAdb -Arguments @('logcat', '-c') -AllowFailure | Out-Null
 
     Assert-Matrix (Test-Path -LiteralPath $testApk -PathType Leaf) "acceptance test APK is missing: $testApk"
-    Invoke-SerialAdb -Arguments @('install', '-r', $testApk) | Out-Null
+    Invoke-SerialAdb -Arguments @('install', $testApk) | Out-Null
+    $installedTestByRun = $true
 
     $navigationOverlay = if ($NavigationMode -eq 'gesture') {
         'com.android.internal.systemui.navbar.gestural'
@@ -459,6 +463,8 @@ try {
     $failure = $_.Exception.Message
     throw
 } finally {
+    if ($installedTestByRun) { Invoke-SerialAdb -Arguments @('uninstall', 'com.xinyue.reader.test') -AllowFailure | Out-Null }
+    if ($installedAppByRun) { Invoke-SerialAdb -Arguments @('uninstall', 'com.xinyue.reader') -AllowFailure | Out-Null }
     if ($null -ne $originalFontScale) { Invoke-SerialAdb -Arguments @('shell', 'settings', 'put', 'system', 'font_scale', $originalFontScale) -AllowFailure | Out-Null }
     if ($null -ne $originalAutoRotation) { Invoke-SerialAdb -Arguments @('shell', 'settings', 'put', 'system', 'accelerometer_rotation', $originalAutoRotation) -AllowFailure | Out-Null }
     if ($null -ne $originalUserRotation) { Invoke-SerialAdb -Arguments @('shell', 'settings', 'put', 'system', 'user_rotation', $originalUserRotation) -AllowFailure | Out-Null }

@@ -25,9 +25,13 @@ import kotlinx.serialization.encodeToString
 class DefaultRestorePlanResolver @Inject constructor() : RestorePlanResolver {
     override fun resolve(prepared: PreparedRestorePlan, request: RestoreRequest): ResolvedRestore {
         require(request.stagedPlanToken == prepared.plan.stagedPlanToken) { "恢复计划 token 不匹配" }
+        // Also accept archives exported by older versions before omitted references were cleared.
+        val normalized = if (prepared.staged.manifest.options.includeFonts) prepared else {
+            prepared.copy(backupCatalog = prepared.backupCatalog.withoutImportedFonts())
+        }
         return when (request.mode) {
-            RestoreMode.OVERWRITE -> overwrite(prepared)
-            RestoreMode.MERGE -> merge(prepared, request)
+            RestoreMode.OVERWRITE -> overwrite(normalized)
+            RestoreMode.MERGE -> merge(normalized, request)
         }
     }
 
@@ -85,6 +89,8 @@ class DefaultRestorePlanResolver @Inject constructor() : RestorePlanResolver {
             val choice = resolution?.choice
             val target = when (choice) {
                 RestoreConflictChoice.RENAME_BACKUP -> uniqueId(incoming.id, groups.keys)
+                RestoreConflictChoice.KEEP_LOCAL -> planned.targetId.takeIf { it in groups }
+                    ?: incoming.id.also { require(it in groups) { "保留的本地分组不存在" } }
                 else -> planned.targetId
             }
             groupMap[incoming.id] = target
@@ -117,12 +123,14 @@ class DefaultRestorePlanResolver @Inject constructor() : RestorePlanResolver {
             val choice = resolution?.choice
             val target = when (choice) {
                 RestoreConflictChoice.RENAME_BACKUP -> uniqueId(incoming.id, themes.keys)
+                RestoreConflictChoice.KEEP_LOCAL -> planned.targetId.takeIf { it in themes }
+                    ?: incoming.id.also { require(it in themes) { "保留的本地主题不存在" } }
                 else -> planned.targetId
             }
             themeMap[incoming.id] = target
+            if (choice == RestoreConflictChoice.KEEP_LOCAL || planned.action == RestoreActionKind.SKIP_IDENTICAL) return@forEach
             val mapped = incoming.copy(id = target).remapJson(fontMap)
             when {
-                choice == RestoreConflictChoice.KEEP_LOCAL || planned.action == RestoreActionKind.SKIP_IDENTICAL -> Unit
                 choice == RestoreConflictChoice.RENAME_BACKUP -> putNamedTheme(themes, mapped.copy(name = requireNotNull(resolution.renamedValue).trim()))
                 planned.action != RestoreActionKind.KEEP_LOCAL || choice == RestoreConflictChoice.USE_BACKUP -> putNamedTheme(themes, mapped)
             }

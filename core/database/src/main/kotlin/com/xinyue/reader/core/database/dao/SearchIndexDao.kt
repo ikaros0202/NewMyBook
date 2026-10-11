@@ -47,11 +47,12 @@ interface SearchIndexDao {
         WHERE search_chunks_fts MATCH :matchQuery
           AND c.bookId = :bookId
           AND c.generationId = s.activeGenerationId
-        ORDER BY rank
+          AND c.rowid > :afterRowId
+        ORDER BY c.rowid
         LIMIT :limit
         """,
     )
-    suspend fun searchTrigram(bookId: String, matchQuery: String, limit: Int): List<SearchChunkHit>
+    suspend fun searchTrigram(bookId: String, matchQuery: String, limit: Int, afterRowId: Long = 0): List<SearchChunkHit>
 
     @Query(
         """
@@ -62,11 +63,12 @@ interface SearchIndexDao {
         WHERE c.bookId = :bookId
           AND c.generationId = s.activeGenerationId
           AND c.content LIKE :likePattern ESCAPE '\'
-        ORDER BY c.startOffset
+          AND c.rowid > :afterRowId
+        ORDER BY c.rowid
         LIMIT :limit
         """,
     )
-    suspend fun searchShort(bookId: String, likePattern: String, limit: Int): List<SearchChunkHit>
+    suspend fun searchShort(bookId: String, likePattern: String, limit: Int, afterRowId: Long = 0): List<SearchChunkHit>
 
     @Transaction
     suspend fun beginBuild(state: SearchIndexStateEntity) {

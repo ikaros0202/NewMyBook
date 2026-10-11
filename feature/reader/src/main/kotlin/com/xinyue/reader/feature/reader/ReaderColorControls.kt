@@ -1,6 +1,7 @@
 package com.xinyue.reader.feature.reader
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,10 +13,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -28,7 +33,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.xinyue.reader.core.domain.model.ReaderColorContrast
 import com.xinyue.reader.core.domain.model.ReaderSettings
@@ -36,6 +46,7 @@ import com.xinyue.reader.core.domain.model.ReaderThemeManualOverride
 import com.xinyue.reader.core.domain.model.ReaderThemePreset
 import com.xinyue.reader.core.domain.model.ReaderThemeSchedule
 import com.xinyue.reader.core.domain.model.ThemeScheduleMode
+import com.xinyue.reader.core.ui.XinYueIcons
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -164,11 +175,25 @@ internal fun ReaderArgbEditor(
             )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            TextButton(onClick = { expanded = !expanded }, modifier = Modifier.heightIn(min = 48.dp)) {
+            TextButton(
+                onClick = { expanded = !expanded },
+                modifier = Modifier.heightIn(min = 48.dp),
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                ),
+            ) {
                 Text(if (expanded) "收起调色" else "展开调色")
             }
-            TextButton(onClick = { onArgbChanged(resetArgb) }, modifier = Modifier.heightIn(min = 48.dp)) {
-                Text("重置")
+            if (expanded) {
+                TextButton(
+                    onClick = { onArgbChanged(resetArgb) },
+                    modifier = Modifier.heightIn(min = 48.dp),
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ),
+                ) {
+                    Text("重置")
+                }
             }
         }
         if (expanded) {
@@ -193,11 +218,12 @@ private fun ReaderChannelSlider(
 ) {
     Column {
         Text("$label $value$suffix")
-        Slider(
+        ReaderSettingSlider(
             value = value.toFloat(),
             onValueChange = { onValueChanged(it.roundToInt().coerceIn(range)) },
             valueRange = range.first.toFloat()..range.last.toFloat(),
             steps = (range.last - range.first - 1).coerceAtLeast(0),
+            contentDescription = "$label $value$suffix",
         )
     }
 }
@@ -239,10 +265,10 @@ internal fun ReaderThemeScheduleControls(
                 onScheduleChanged(schedule.copy(darkThemeId = it))
             }
             if (schedule.mode == ThemeScheduleMode.FIXED_TIME) {
-                MinuteOfDaySlider("日间开始", schedule.lightMinuteOfDay) {
+                MinuteOfDayPicker("日间开始", "light", schedule.lightMinuteOfDay) {
                     onScheduleChanged(schedule.copy(lightMinuteOfDay = it))
                 }
-                MinuteOfDaySlider("夜间开始", schedule.darkMinuteOfDay) {
+                MinuteOfDayPicker("夜间开始", "dark", schedule.darkMinuteOfDay) {
                     onScheduleChanged(schedule.copy(darkMinuteOfDay = it))
                 }
             }
@@ -276,30 +302,164 @@ private fun ThemeChoiceRow(
     themes: List<ReaderThemePreset>,
     onSelected: (String) -> Unit,
 ) {
-    Text(label)
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        themes.forEach { theme ->
-            FilterChip(
-                selected = theme.id == selectedId,
-                onClick = { onSelected(theme.id) },
-                modifier = Modifier.testTag("reader-theme-schedule-$slot-${theme.id}"),
-                label = { Text(theme.name) },
+    var expanded by remember(slot) { mutableStateOf(false) }
+    val selectedTheme = themes.firstOrNull { it.id == selectedId }
+    val selectedName = selectedTheme?.name ?: "未选择"
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 56.dp)
+                .clickable { expanded = true }
+                .testTag("reader-theme-schedule-$slot")
+                .semantics {
+                    contentDescription = "$label $selectedName"
+                },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(label, modifier = Modifier.weight(1f))
+            Text(
+                selectedName,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Icon(
+                painter = painterResource(XinYueIcons.ChevronRight),
+                contentDescription = null,
+                modifier = Modifier.size(24.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            themes.forEach { theme ->
+                val isSelected = theme.id == selectedId
+                DropdownMenuItem(
+                    text = { Text(theme.name) },
+                    onClick = {
+                        expanded = false
+                        onSelected(theme.id)
+                    },
+                    trailingIcon = if (isSelected) {
+                        {
+                            Icon(
+                                painter = painterResource(XinYueIcons.Check),
+                                contentDescription = "已选择",
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    } else {
+                        null
+                    },
+                    modifier = Modifier
+                        .testTag("reader-theme-schedule-$slot-${theme.id}")
+                        .semantics { selected = isSelected },
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun MinuteOfDaySlider(label: String, minuteOfDay: Int, onChanged: (Int) -> Unit) {
+private fun MinuteOfDayPicker(
+    label: String,
+    slot: String,
+    minuteOfDay: Int,
+    onChanged: (Int) -> Unit,
+) {
     val safe = minuteOfDay.coerceIn(0, 1439)
-    var preview by remember(safe) { mutableStateOf(safe) }
-    val formatted = String.format(Locale.ROOT, "%02d:%02d", preview / 60, preview % 60)
-    Text("$label $formatted")
-    Slider(
-        value = preview.toFloat(),
-        onValueChange = { preview = it.roundToInt().coerceIn(0, 1439) },
-        onValueChangeFinished = { onChanged(preview) },
-        valueRange = 0f..1439f,
-        steps = 1438,
-    )
+    val formatted = String.format(Locale.ROOT, "%02d:%02d", safe / 60, safe % 60)
+    var dialogVisible by remember { mutableStateOf(false) }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .clickable { dialogVisible = true }
+            .testTag("reader-theme-schedule-time-$slot")
+            .semantics { contentDescription = "$label $formatted" },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(label, modifier = Modifier.weight(1f))
+        Text(
+            formatted,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Icon(
+            painter = painterResource(XinYueIcons.ChevronRight),
+            contentDescription = null,
+            modifier = Modifier.size(24.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    if (dialogVisible) {
+        var hourText by remember(dialogVisible, safe) {
+            mutableStateOf(String.format(Locale.ROOT, "%02d", safe / 60))
+        }
+        var minuteText by remember(dialogVisible, safe) {
+            mutableStateOf(String.format(Locale.ROOT, "%02d", safe % 60))
+        }
+        val hour = hourText.toIntOrNull()
+        val minute = minuteText.toIntOrNull()
+        val hourValid = hour?.let { it in 0..23 } == true
+        val minuteValid = minute?.let { it in 0..59 } == true
+        val timeValid = hourValid && minuteValid
+        AlertDialog(
+            onDismissRequest = { dialogVisible = false },
+            title = { Text(label) },
+            text = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedTextField(
+                        value = hourText,
+                        onValueChange = { value ->
+                            hourText = value.filter { it.isDigit() }.take(2)
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("reader-theme-schedule-time-$slot-hour"),
+                        label = { Text("时") },
+                        supportingText = { Text("00–23") },
+                        isError = !hourValid,
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                    OutlinedTextField(
+                        value = minuteText,
+                        onValueChange = { value ->
+                            minuteText = value.filter { it.isDigit() }.take(2)
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("reader-theme-schedule-time-$slot-minute"),
+                        label = { Text("分") },
+                        supportingText = { Text("00–59") },
+                        isError = !minuteValid,
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = timeValid,
+                    onClick = {
+                        if (timeValid) {
+                            dialogVisible = false
+                            onChanged(((hour ?: 0) * 60 + (minute ?: 0)).coerceIn(0, 1439))
+                        }
+                    },
+                ) { Text("确定") }
+            },
+            dismissButton = {
+                TextButton(onClick = { dialogVisible = false }) { Text("取消") }
+            },
+        )
+    }
 }

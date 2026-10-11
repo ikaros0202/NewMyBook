@@ -34,6 +34,7 @@ class LibrarySearchAndMenusUiTest {
     @Test
     fun longTitleAndBookActionsUseSeparateRegions() {
         var expanded by mutableStateOf(false)
+        var selectionEntered by mutableStateOf(false)
         compose.setContent {
             MaterialTheme {
                 LibraryBookCard(
@@ -43,7 +44,7 @@ class LibrarySearchAndMenusUiTest {
                     selected = false,
                     menuExpanded = expanded,
                     onOpen = {},
-                    onEnterSelection = {},
+                    onEnterSelection = { selectionEntered = true },
                     onToggleSelection = {},
                     onMenuExpandedChange = { expanded = it },
                     onEdit = {},
@@ -71,6 +72,9 @@ class LibrarySearchAndMenusUiTest {
         compose.onNodeWithText("编辑").assertIsDisplayed()
         compose.onNodeWithText("统计").assertIsDisplayed()
         compose.onNodeWithText("删除").assertIsDisplayed()
+        compose.onNodeWithText("选择").performClick()
+        assertTrue(selectionEntered)
+        compose.onNodeWithTag("library_book_menu_book-1").assertDoesNotExist()
     }
 
     @Test

@@ -77,7 +77,7 @@ class DurablePendingBookFileCleanupTest {
 
         override suspend fun discard(staged: StagedBookFiles) = Unit
 
-        override suspend fun remove(stored: StoredBookFiles) {
+        override suspend fun remove(stored: StoredBookFiles, preserveCover: Boolean, ownerBookId: String?) {
             removed += stored
             removeFailure?.let { throw it }
         }

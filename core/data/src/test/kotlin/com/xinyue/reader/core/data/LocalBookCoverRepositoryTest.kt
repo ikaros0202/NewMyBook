@@ -20,6 +20,22 @@ import kotlin.test.assertFailsWith
 
 class LocalBookCoverRepositoryTest {
     @Test
+    fun `cover import works when replacement text uses another private generation`() = runTest {
+        val root = Files.createTempDirectory("cover-replaced-book").toFile()
+        val dao = FakeBookDao(sampleBook().copy(
+            originalPath = "books/text-generation/original.txt",
+            normalizedPath = "books/text-generation/content.txt",
+        ))
+        val repository = LocalBookCoverRepository(root, dao, FakeCoverDecoder(), UnconfinedTestDispatcher(testScheduler))
+
+        val path = repository.importCover("book-1", source(size = 8, bytes = 8))
+
+        assertThat(path).isEqualTo("books/book-1/cover.webp")
+        assertThat(BookCoverModelResolver(root).resolve(dao.book)).isNotNull()
+        root.deleteRecursively()
+    }
+
+    @Test
     fun `actual reads are capped at twenty MiB and zero byte sources are rejected`() = runTest {
         val root = Files.createTempDirectory("cover-limit").toFile()
         val dao = FakeBookDao(sampleBook())

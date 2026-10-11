@@ -1,21 +1,24 @@
 # 新阅文档导航
 
-当前统一基线为 **1.0.0**。产品现状以 [BASELINE.md](BASELINE.md) 为入口，具体实现以源码和构建配置为准；本地历史归档只用于追溯。
+**1.0.0** 保留为统一起始基线，**1.0.1** 的连续阅读修复作为继承能力保留；当前源码/Debug 版本为 **1.0.2（versionCode 10）**。产品现状以 [BASELINE.md](BASELINE.md) 为入口，具体实现以源码和构建配置为准。本轮已完成界面实现、定向检查及页面截图复核；设备范围和未验证边界见 QA，暂不发布或上传。
 
 | 要了解的内容 | 入口 |
 |---|---|
 | 产品目标、现有功能、版本与验证边界 | [当前基线](BASELINE.md) |
 | 当前任务与交接 | [tasks/current.md](../tasks/current.md) |
-| 构建、定向验证、协作参考 | [开发说明](DEVELOPMENT.md)、[账号交接](ACCOUNT_COORDINATION.md) |
+| 1.0.2 UI 整理计划与实施背景 | [1.0.2 UI 整理计划](plans/1.0.2-ui-refinement.md) |
+| 简短开发基线、协作参考 | [开发基线](DEVELOPMENT.md)、[账号交接](ACCOUNT_COORDINATION.md) |
 | 模块、入口、数据所有权 | [架构](architecture/README.md) |
 | 导入、阅读、搜索、备份等跨模块流程 | [调用链](architecture/FLOWS.md) |
 | 准备修改某项能力的接口与测试 | [契约导航](contracts/README.md) |
-| 当前纸页/墨色界面规范 | [设计系统](../design-system/xinyue/MASTER.md) |
+| 当前书架、阅读与工具界面规范 | [设计系统](../design-system/xinyue/MASTER.md) |
 | 应用运行时隐私、依赖许可 | [隐私说明](PRIVACY.md)、[组件说明](OPEN_SOURCE_NOTICES.md) |
 | 上传源码时的公开范围与检查 | [公开源码隐私说明](PUBLIC_REPOSITORY_PRIVACY.md) |
-| 当前验证记录与可复用脚本 | [QA 入口](../qa/README.md) |
+| 当前 1.0.2 定向验证和截图记录 | [QA 入口](../qa/current/1.0.2/README.md) |
 
-按当次问题选读即可。架构和契约页帮助定位代码，不要求每次全部阅读；开发说明是操作参考，不追加流程门禁。
+按当次问题选读即可。架构和契约页帮助定位代码，不要求每次全部阅读；开发基线只记录少量现状，具体安排由当次对话决定。
+
+当前 1.0.2 使用白色与中性灰工具界面、少量暖橙强调，放大书封并移除书架进度条。阅读位置改为目录选章与实际全书页码跳转；设置分组并使用紧凑数值控件，同时加入自动翻页和定时停止。具体行为和验证边界见 [当前基线](BASELINE.md)、[1.0.2 UI 整理计划](plans/1.0.2-ui-refinement.md) 与 [1.0.2 QA 入口](../qa/current/1.0.2/README.md)。
 
 ## 历史与维护方式
 

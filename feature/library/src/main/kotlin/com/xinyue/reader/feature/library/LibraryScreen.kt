@@ -24,7 +24,6 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.wrapContentSize
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -44,7 +43,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.SnackbarHost
@@ -57,6 +55,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -72,7 +71,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
@@ -110,7 +108,7 @@ fun LibraryRoute(
     viewModel: LibraryViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    var coverBookId by remember { mutableStateOf<String?>(null) }
+    var coverBookId by rememberSaveable { mutableStateOf<String?>(null) }
     val coverPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val bookId = coverBookId
         coverBookId = null
@@ -277,7 +275,10 @@ fun LibraryScreen(
                     selected = false,
                     menuExpanded = transientMenu == LibraryTransientMenu.Book(book.id),
                     onOpen = { onOpenBook(book.id) },
-                    onEnterSelection = { onEnterSelection(book.id) },
+                    onEnterSelection = {
+                        closeSearch()
+                        onEnterSelection(book.id)
+                    },
                     onToggleSelection = {},
                     onMenuExpandedChange = { expanded ->
                         transientMenu = if (expanded) {
@@ -309,51 +310,30 @@ fun LibraryScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Text(
-                            text = "书架",
-                            style = MaterialTheme.typography.headlineSmall,
-                            maxLines = 1,
-                        )
-                        Surface(
-                            onClick = {
-                                transientMenu = LibraryTransientMenu.None
-                                onSearchActiveChange(true)
-                            },
-                            modifier = Modifier
-                                .weight(1f)
-                                .then(sharedField)
-                                .testTag("library_search_trigger"),
-                            shape = RectangleShape,
-                            color = androidx.compose.ui.graphics.Color.Transparent,
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Icon(
-                                    painter = painterResource(XinYueIcons.Search),
-                                    contentDescription = null,
-                                    modifier = Modifier.size(20.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                Text(
-                                    text = "搜索书名、作者或系列",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                        }
-                    }
+                    Text(
+                        text = "书架",
+                        style = MaterialTheme.typography.titleLarge,
+                        maxLines = 1,
+                    )
                 },
                 actions = {
+                    IconButton(
+                        onClick = {
+                            transientMenu = LibraryTransientMenu.None
+                            onSearchActiveChange(true)
+                        },
+                        modifier = Modifier
+                            .then(sharedField)
+                            .size(48.dp)
+                            .testTag("library_search_trigger"),
+                    ) {
+                        Icon(
+                            painter = painterResource(XinYueIcons.Search),
+                            contentDescription = "搜索书名、作者或系列",
+                            modifier = Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     if (primaryImportPlacement(uiState.hasAnyBooks) == PrimaryImportPlacement.TOP_BAR) {
                         IconButton(
                             onClick = onImport,
@@ -399,13 +379,28 @@ fun LibraryScreen(
                         },
                     )
                     if (showTopActions) {
-                        TextButton(
+                        IconButton(
                             onClick = onOpenBackup,
                             modifier = Modifier
-                                .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+                                .size(48.dp)
                                 .testTag("library_backup"),
-                        ) { Text("备份") }
-                        TextButton(onClick = { onOpenStatistics(null) }) { Text("统计") }
+                        ) {
+                            Icon(
+                                painter = painterResource(XinYueIcons.Backup),
+                                contentDescription = "备份与恢复",
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                        IconButton(
+                            onClick = { onOpenStatistics(null) },
+                            modifier = Modifier.size(48.dp).testTag("library_statistics"),
+                        ) {
+                            Icon(
+                                painter = painterResource(XinYueIcons.Statistics),
+                                contentDescription = "阅读统计",
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
                     }
                 },
             )
@@ -433,9 +428,9 @@ fun LibraryScreen(
                     .fillMaxSize()
                     .testTag("library-shelf-list"),
                 state = shelfGridState,
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(if (isGrid) 16.dp else 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(if (isGrid) 12.dp else 0.dp),
+                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(if (isGrid) 12.dp else 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(if (isGrid) 8.dp else 0.dp),
             ) {
                 if (uiState.isSelectionMode) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
@@ -668,7 +663,7 @@ private fun LibraryShelfOptionsMenu(
             modifier = Modifier.testTag("library-options-menu"),
         ) {
             DropdownMenuItem(
-                text = { Text("浏览方式") },
+                text = { Text("浏览内容") },
                 onClick = {},
                 enabled = false,
             )
@@ -683,7 +678,7 @@ private fun LibraryShelfOptionsMenu(
                 )
             }
             DropdownMenuItem(
-                text = { Text("排序") },
+                text = { Text("排序方式") },
                 onClick = {},
                 enabled = false,
             )
@@ -765,35 +760,31 @@ private fun LibraryLayoutSelector(
                     .testTag("library-layout-list")
                     .semantics { selected = preference.mode == LibraryLayoutMode.COMPACT_LIST },
             )
-            LibraryGridDensity.entries.forEach { density ->
-                DropdownMenuItem(
-                    text = { Text(density.label) },
-                    leadingIcon = {
-                        Icon(
-                            painter = painterResource(XinYueIcons.GridView),
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    },
-                    trailingIcon = selectedCheck(
-                        preference.mode == LibraryLayoutMode.COVER_GRID &&
-                            preference.gridDensity == density,
-                    ),
-                    onClick = {
-                        onSelected(
-                            preference.copy(
-                                mode = LibraryLayoutMode.COVER_GRID,
-                                gridDensity = density,
-                            ),
-                        )
-                    },
-                    modifier = Modifier
-                        .testTag("library-density-${density.name.lowercase()}")
-                        .semantics {
-                            selected = preference.mode == LibraryLayoutMode.COVER_GRID &&
-                                preference.gridDensity == density
+            if (preference.mode == LibraryLayoutMode.COVER_GRID) {
+                LibraryGridDensity.entries.forEach { density ->
+                    DropdownMenuItem(
+                        text = { Text(density.label) },
+                        leadingIcon = {
+                            Icon(
+                                painter = painterResource(XinYueIcons.GridView),
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                            )
                         },
-                )
+                        trailingIcon = selectedCheck(preference.gridDensity == density),
+                        onClick = {
+                            onSelected(
+                                preference.copy(
+                                    mode = LibraryLayoutMode.COVER_GRID,
+                                    gridDensity = density,
+                                ),
+                            )
+                        },
+                        modifier = Modifier
+                            .testTag("library-density-${density.name.lowercase()}")
+                            .semantics { selected = preference.gridDensity == density },
+                    )
+                }
             }
         }
     }
@@ -977,7 +968,7 @@ internal fun LibrarySortSelector(
 
 private val LibrarySort.label: String
     get() = when (this) {
-        LibrarySort.RECENT -> "最近阅读"
+        LibrarySort.RECENT -> "最近打开"
         LibrarySort.IMPORTED -> "导入时间"
         LibrarySort.TITLE -> "书名"
     }
@@ -997,7 +988,7 @@ private fun ShelfEmptyMessage(
         Icon(
             painter = painterResource(XinYueIcons.Library),
             contentDescription = null,
-            modifier = Modifier.size(44.dp),
+            modifier = Modifier.size(40.dp),
             tint = MaterialTheme.colorScheme.primary,
         )
         Text(
@@ -1006,7 +997,7 @@ private fun ShelfEmptyMessage(
                 query.isNotBlank() -> "没有匹配“${query.trim()}”的书籍"
                 else -> "当前视图没有书籍"
             },
-            style = MaterialTheme.typography.headlineSmall,
+            style = MaterialTheme.typography.titleLarge,
             textAlign = TextAlign.Center,
         )
         if (shelfIsEmpty) {
@@ -1132,7 +1123,7 @@ internal fun RenameBookDialog(
                     }
                 }
                 Text(
-                    text = if (isCoverUpdating) "正在处理封面…" else if (book.customCoverPath != null) "正在使用自定义封面" else "正在使用默认封面",
+                    text = if (isCoverUpdating) "正在处理封面…" else if (book.customCoverPath != null) "当前使用自定义封面" else "当前使用默认封面",
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(top = 12.dp),
                 )

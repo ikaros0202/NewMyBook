@@ -18,6 +18,7 @@
 | TXT 暂存、发布和补偿删除 | [`BookFileStore`](../../core/data/src/main/kotlin/com/xinyue/reader/core/data/BookFileStore.kt) | [`LocalBookFileStore`](../../core/data/src/main/kotlin/com/xinyue/reader/core/data/LocalBookFileStore.kt) | [`LocalBookFileStoreTest`](../../core/data/src/test/kotlin/com/xinyue/reader/core/data/LocalBookFileStoreTest.kt) |
 | 文件、哈希、重复书籍和数据库协调 | [`BookImporter`](../../core/data/src/main/kotlin/com/xinyue/reader/core/data/ImportBookUseCase.kt) | 同文件中的 `ImportBookUseCase` | [`ImportBookUseCaseTest`](../../core/data/src/test/kotlin/com/xinyue/reader/core/data/ImportBookUseCaseTest.kt) |
 | 重复书籍查询和元数据发布 | [`BookRepository`](../../core/domain/src/main/kotlin/com/xinyue/reader/core/domain/repository/BookRepository.kt) | [`RoomBookRepository`](../../core/data/src/main/kotlin/com/xinyue/reader/core/data/RoomBookRepository.kt) | [`RoomBookRepositoryTest`](../../core/data/src/test/kotlin/com/xinyue/reader/core/data/RoomBookRepositoryTest.kt) |
+| 成功结果与直接阅读入口 | [`ImportItemState.bookId`](../../core/data/src/main/kotlin/com/xinyue/reader/core/data/ImportTaskModels.kt) | [`ImportScreen`](../../feature/import/src/main/kotlin/com/xinyue/reader/feature/importing/ImportScreen.kt)、[`MainActivity`](../../app/src/main/kotlin/com/xinyue/reader/MainActivity.kt) | [`ImportScreenTest`](../../feature/import/src/androidTest/kotlin/com/xinyue/reader/feature/importing/ImportScreenTest.kt) |
 
 导入 Worker 入口：[`ImportTxtWorker.kt`](../../core/data/src/main/kotlin/com/xinyue/reader/core/data/ImportTxtWorker.kt)。导入源领域模型：[`ImportSource.kt`](../../core/domain/src/main/kotlin/com/xinyue/reader/core/domain/model/ImportSource.kt)。
 
@@ -40,6 +41,7 @@
 - 不含正文的 `.xinyuehandoff` 只能绑定 `contentSha256` 完全相同的既有书籍；不得按书名、作者或文件名模糊匹配。含正文接力包可在没有同哈希书籍时发布为新书。
 - 文件发布与数据库提交必须有补偿；失败不能留下可见半成品或无法追踪的私有正文。
 - 导入状态持久化在数据库/WorkManager，UI 不直接执行长时间复制。
+- `SUCCEEDED` 且 `bookId` 有效的结果提供“开始阅读”入口；点击后由 `MainActivity` 压入 `ReaderDestination(bookId)`，并保留 `ImportDestination` 以便返回导入结果。失败、排队中、取消或仍需重复决策的结果不显示假阅读入口。
 - 搜索、阅读、进度和标注共享规范化正文的 UTF-16 偏移空间。
 - 搜索索引按内容哈希和 generation 管理；新 generation 完成后才替换 active，失败或取消保留上一份可用索引。
 - 搜索和索引处理必须分窗、有界，不能把50 MiB正文一次性加载到热路径。

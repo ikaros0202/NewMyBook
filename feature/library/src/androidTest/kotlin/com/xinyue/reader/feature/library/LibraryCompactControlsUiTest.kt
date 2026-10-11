@@ -91,7 +91,7 @@ class LibraryCompactControlsUiTest {
             }
         }
 
-        listOf("已读", "阅读中", "未读", "集合").forEach { compose.onNodeWithText(it).assertIsDisplayed() }
+        listOf("已读", "阅读中", "未读", "更多筛选").forEach { compose.onNodeWithText(it).assertIsDisplayed() }
         compose.onNodeWithText("全部").assertDoesNotExist()
         compose.onNodeWithText("阅读中").performClick()
         assertEquals(LibraryFilter.Reading, selected)
@@ -99,7 +99,7 @@ class LibraryCompactControlsUiTest {
         assertEquals(LibraryFilter.All, selected)
 
         compose.onNodeWithTag("library-filter-more").performClick()
-        listOf("最近阅读", "未加入集合").forEach { compose.onNodeWithText(it).assertIsDisplayed() }
+        listOf("近30天", "未加入集合").forEach { compose.onNodeWithText(it).assertIsDisplayed() }
     }
 
     @Test
@@ -264,7 +264,7 @@ class LibraryCompactControlsUiTest {
             .assert(
                 SemanticsMatcher.expectValue(
                     SemanticsProperties.StateDescription,
-                    "书籍，按最近阅读排序",
+                    "书籍，按最近打开排序",
                 ),
             )
             .performClick()
@@ -351,6 +351,10 @@ class LibraryCompactControlsUiTest {
         compose.onNodeWithTag("library-layout-button").performClick()
         compose.onNodeWithTag("library-layout-list").performClick()
         assertEquals(LibraryLayoutMode.COMPACT_LIST, selected.mode)
+
+        compose.onNodeWithTag("library-layout-button").performClick()
+        compose.onNodeWithTag("library-density-compact").assertDoesNotExist()
+        compose.onNodeWithTag("library-layout-grid").performClick()
 
         compose.onNodeWithTag("library-layout-button").performClick()
         compose.onNodeWithTag("library-density-compact").performClick()

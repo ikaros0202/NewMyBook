@@ -93,13 +93,14 @@ internal fun ReaderNavigationDrawer(
 ) {
     var selectedTab by remember(initialTab) { mutableStateOf(initialTab) }
     var query by remember { mutableStateOf("") }
+    var locateCurrentRequest by remember { mutableStateOf(0) }
     var deleteTarget by remember { mutableStateOf<Bookmark?>(null) }
     val currentChapter = currentReaderChapter(chapters, anchorOffset)
     val filteredChapters = filterReaderChapters(chapters, query)
     val orderedBookmarks = sortedReaderBookmarks(bookmarks)
     val chapterListState = rememberLazyListState()
 
-    LaunchedEffect(selectedTab, filteredChapters, currentChapter) {
+    LaunchedEffect(selectedTab, filteredChapters, currentChapter, locateCurrentRequest) {
         if (selectedTab == ReaderNavigationTab.CHAPTERS) {
             val currentIndex = filteredChapters.indexOf(currentChapter)
             if (currentIndex >= 0) chapterListState.scrollToItem(currentIndex)
@@ -113,7 +114,7 @@ internal fun ReaderNavigationDrawer(
             decorFitsSystemWindows = false,
         ),
     ) {
-        KeepDialogImmersive()
+        KeepReaderDialogImmersive()
         Box(
             modifier = Modifier.fillMaxSize()
                 .background(Color.Black.copy(alpha = 0.48f))
@@ -164,7 +165,10 @@ internal fun ReaderNavigationDrawer(
                                     .testTag("reader-directory-search"),
                                 trailingIcon = {
                                     IconButton(
-                                        onClick = { query = "" },
+                                        onClick = {
+                                            query = ""
+                                            locateCurrentRequest += 1
+                                        },
                                         modifier = Modifier.size(48.dp),
                                     ) {
                                         Icon(
@@ -301,11 +305,12 @@ internal fun ReaderNavigationDrawer(
 }
 
 @Composable
-private fun KeepDialogImmersive() {
+internal fun KeepReaderDialogImmersive(dimAmount: Float? = null) {
     val view = LocalView.current
     DisposableEffect(view) {
         val window = (view.parent as? DialogWindowProvider)?.window
         if (window != null) {
+            dimAmount?.let(window::setDimAmount)
             WindowCompat.setDecorFitsSystemWindows(window, false)
             WindowInsetsControllerCompat(window, window.decorView).apply {
                 systemBarsBehavior =

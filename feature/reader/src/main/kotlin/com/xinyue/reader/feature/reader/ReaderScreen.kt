@@ -9,6 +9,7 @@ import android.provider.Settings
 import android.text.format.DateFormat
 import android.view.ViewTreeObserver
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.animation.AnimatedVisibility
@@ -18,6 +19,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.rememberScrollState
@@ -59,7 +61,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -70,6 +73,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.rememberCoroutineScope
@@ -79,6 +83,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
@@ -118,14 +123,16 @@ import com.xinyue.reader.core.domain.model.AnnotationKind
 import com.xinyue.reader.core.domain.model.AnnotationExportFormat
 import com.xinyue.reader.core.domain.model.AnnotationExportRequest
 import com.xinyue.reader.core.domain.model.HighlightColor
-import com.xinyue.reader.core.data.ReaderPositionPreview
 import com.xinyue.reader.core.text.DetectedChapter
 import com.xinyue.reader.core.ui.XinYueIcons
+import com.xinyue.reader.core.ui.XinYueTheme
+import com.xinyue.reader.core.ui.AnnotationExportRequestSaver
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import java.util.Date
+import java.util.Locale
 import kotlin.math.roundToLong
 
 @Composable
@@ -141,7 +148,7 @@ fun ReaderRoute(
     val fontPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { viewModel.importFont(it.toString()) }
     }
-    var pendingAnnotationExport by remember { mutableStateOf<AnnotationExportRequest?>(null) }
+    var pendingAnnotationExport by rememberSaveable(stateSaver = AnnotationExportRequestSaver) { mutableStateOf<AnnotationExportRequest?>(null) }
     val markdownExportPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("text/markdown"),
     ) { uri ->
@@ -180,6 +187,11 @@ fun ReaderRoute(
     ReaderScreenWithAppearance(
         uiState = uiState,
         onPageChanged = viewModel::goToPage,
+        onSpeechPosition = viewModel::advanceSpeechTo,
+        onJumpToChapter = { offset ->
+            viewModel.jumpToChapter(offset)
+            viewModel.recordUserInteraction()
+        },
         onJumpTemporarily = { offset, reason ->
             viewModel.jumpTemporarily(offset, reason)
             viewModel.recordUserInteraction()
@@ -202,6 +214,9 @@ fun ReaderRoute(
             viewModel.recordUserInteraction()
         },
         onCancelProgressPreview = viewModel::cancelProgressPreview,
+        onPrepareBookPageIndex = viewModel::prepareBookPageIndex,
+        onCancelBookPageIndex = viewModel::cancelBookPageIndex,
+        onJumpToBookPage = viewModel::jumpToBookPage,
         onImportFont = {
             viewModel.recordUserInteraction()
             fontPicker.launch(
@@ -329,12 +344,16 @@ fun ReaderScreen(
     uiState: ReaderUiState,
     onPageChanged: (Int) -> Unit,
     onJumpTemporarily: (Int, ReaderJumpReason) -> Unit,
+    onJumpToChapter: (Int) -> Unit = { onJumpTemporarily(it, ReaderJumpReason.CHAPTER) },
     onNavigateBack: () -> Unit,
     onReturnToOrigin: () -> Unit,
     onContinueFromHere: () -> Unit,
     onPreviewProgress: (Float) -> Unit,
     onCommitProgressPreview: () -> Unit,
     onCancelProgressPreview: () -> Unit,
+    onPrepareBookPageIndex: () -> Unit = {},
+    onCancelBookPageIndex: () -> Unit = {},
+    onJumpToBookPage: (Int) -> Unit = {},
     onImportFont: () -> Unit,
     onRemoveImportedFont: (String) -> Unit,
     onSearch: (String) -> Unit,
@@ -363,12 +382,16 @@ fun ReaderScreen(
         uiState = effectiveState,
         onPageChanged = onPageChanged,
         onJumpTemporarily = onJumpTemporarily,
+        onJumpToChapter = onJumpToChapter,
         onNavigateBack = onNavigateBack,
         onReturnToOrigin = onReturnToOrigin,
         onContinueFromHere = onContinueFromHere,
         onPreviewProgress = onPreviewProgress,
         onCommitProgressPreview = onCommitProgressPreview,
         onCancelProgressPreview = onCancelProgressPreview,
+        onPrepareBookPageIndex = onPrepareBookPageIndex,
+        onCancelBookPageIndex = onCancelBookPageIndex,
+        onJumpToBookPage = onJumpToBookPage,
         onImportFont = onImportFont,
         onRemoveImportedFont = onRemoveImportedFont,
         onSearch = onSearch,
@@ -428,13 +451,21 @@ fun ReaderScreen(
 private fun ReaderScreenWithAppearance(
     uiState: ReaderUiState,
     onPageChanged: (Int) -> Unit,
+    onSpeechPosition: (Int) -> Unit = { offset ->
+        uiState.pages.indexOfFirst { offset >= it.startOffset && offset < it.endOffset }
+            .takeIf { it >= 0 }?.let(onPageChanged)
+    },
     onJumpTemporarily: (Int, ReaderJumpReason) -> Unit,
+    onJumpToChapter: (Int) -> Unit,
     onNavigateBack: () -> Unit,
     onReturnToOrigin: () -> Unit,
     onContinueFromHere: () -> Unit,
     onPreviewProgress: (Float) -> Unit,
     onCommitProgressPreview: () -> Unit,
     onCancelProgressPreview: () -> Unit,
+    onPrepareBookPageIndex: () -> Unit = {},
+    onCancelBookPageIndex: () -> Unit = {},
+    onJumpToBookPage: (Int) -> Unit = {},
     onImportFont: () -> Unit,
     onRemoveImportedFont: (String) -> Unit,
     onSearch: (String) -> Unit,
@@ -470,10 +501,25 @@ private fun ReaderScreenWithAppearance(
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val navigationSnackbar = remember { SnackbarHostState() }
+    val navigationFailureText = stringResource(R.string.reader_navigation_failed)
+    LaunchedEffect(uiState.navigationErrorMessage) {
+        if (uiState.navigationErrorMessage != null) navigationSnackbar.showSnackbar(navigationFailureText)
+    }
     ImmersiveSystemBars(uiState.settings)
-    ReaderWindowEffects(uiState.settings)
+    var temporarilyDisableKeepScreenOn by remember(uiState.book?.id) { mutableStateOf(false) }
+    ReaderWindowEffects(
+        settings = uiState.settings,
+        temporarilyDisableKeepScreenOn = temporarilyDisableKeepScreenOn,
+    )
     var controlsVisible by remember { mutableStateOf(false) }
     var activePanel by remember { mutableStateOf<ReaderPanel?>(null) }
+    DisposableEffect(activePanel) {
+        val indexingRequested = activePanel == ReaderPanel.PROGRESS
+        if (indexingRequested) onPrepareBookPageIndex()
+        onDispose { if (indexingRequested) onCancelBookPageIndex() }
+    }
     var appearanceCommitRequested by remember { mutableStateOf(false) }
     var touchLocked by rememberSaveable { mutableStateOf(false) }
     var selectionActive by remember { mutableStateOf(false) }
@@ -487,17 +533,20 @@ private fun ReaderScreenWithAppearance(
     val ttsController = remember(context.applicationContext) {
         ReaderTextToSpeechController(context.applicationContext)
     }
-    var ttsActive by remember { mutableStateOf(false) }
-    var ttsRequestedPage by remember { mutableStateOf<Int?>(null) }
+    val speechSession = remember(uiState.book?.id) { ReaderSpeechSession() }
+    fun stopSpeech() {
+        ttsController.stop()
+        speechSession.stop()
+    }
+    DisposableEffect(uiState.book?.id, ttsController) {
+        onDispose { ttsController.stop(); speechSession.stop() }
+    }
+    var stopTimerNoticeToken by remember { mutableStateOf(0) }
     DisposableEffect(ttsController) {
         onDispose { ttsController.shutdown() }
     }
-    LaunchedEffect(controlsVisible, activePanel) {
-        if (controlsVisible && activePanel == null) {
-            delay(CONTROLS_AUTO_HIDE_MILLIS)
-            controlsVisible = false
-        }
-    }
+    BackHandler(enabled = controlsVisible && activePanel == null) { controlsVisible = false }
+    val menuSwipeThreshold = with(LocalDensity.current) { 48.dp.toPx() }
     LaunchedEffect(performanceNoticeVisible) {
         if (performanceNoticeVisible) {
             delay(PERFORMANCE_NOTICE_MILLIS)
@@ -511,6 +560,7 @@ private fun ReaderScreenWithAppearance(
         }
     }
 
+    XinYueTheme(darkTheme = Color(uiState.settings.backgroundArgb.toInt()).luminance() < 0.5f) {
     when {
         uiState.isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator()
@@ -518,13 +568,18 @@ private fun ReaderScreenWithAppearance(
         uiState.errorMessage != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(uiState.errorMessage)
-                Button(onClick = onBack, modifier = Modifier.padding(top = 16.dp)) { Text("返回书架") }
+                Button(shape = MaterialTheme.shapes.medium, onClick = onBack, modifier = Modifier.padding(top = 16.dp)) { Text("返回书架") }
             }
         }
         else -> {
             val palette = readerPalette(uiState.settings)
+            val visiblePage = uiState.pages.getOrNull(uiState.currentPageIndex)
+            val visibleTextStart = visiblePage?.let { page ->
+                val leading = uiState.layoutTextFor(page).indexOfFirst { it != '\u2060' }.coerceAtLeast(0)
+                page.startOffset + leading
+            } ?: uiState.anchorOffset
             val positionInfo = readerPositionInfo(
-                anchorOffset = uiState.anchorOffset,
+                anchorOffset = maxOf(uiState.anchorOffset, visibleTextStart),
                 contentLength = uiState.contentLength,
                 chapters = uiState.chapters,
             )
@@ -560,7 +615,14 @@ private fun ReaderScreenWithAppearance(
                 chapters = uiState.chapters,
             )
             val bottomInfo = buildList {
-                if (uiState.settings.showPageNumber) pageNumberInfo?.let { add(it.displayText) }
+                if (uiState.settings.showPageNumber) {
+                    val bookPages = uiState.bookPages
+                    if (!bookPages.isNullOrEmpty()) {
+                        add("全书 第${readerBookPageAtOffset(bookPages, uiState.anchorOffset)}/${bookPages.size}页")
+                    } else {
+                        pageNumberInfo?.let { add("本章 " + (if (it.isEstimated) "约 " else "") + it.displayText) }
+                    }
+                }
                 if (uiState.settings.showChapterProgress) {
                     add("本章 ${positionInfo.chapterProgressPercent}%")
                 }
@@ -583,9 +645,14 @@ private fun ReaderScreenWithAppearance(
                 isPaginating = uiState.isPaginating,
             )
             val coroutineScope = rememberCoroutineScope()
+            var pauseAutoPage: () -> Unit = {}
             val turnToPage: (Int, Boolean) -> Unit = { targetPage, userInitiated ->
                 if (targetPage in uiState.pages.indices) {
-                    if (userInitiated) onUserInteraction()
+                    if (userInitiated) {
+                        stopSpeech()
+                        pauseAutoPage()
+                        onUserInteraction()
+                    }
                     coroutineScope.launch {
                         turnReaderPagerToPage(
                             targetPage = targetPage,
@@ -602,6 +669,84 @@ private fun ReaderScreenWithAppearance(
                     }
                 }
 
+            }
+            val autoPageAdvance = rememberUpdatedState<suspend () -> Boolean>(
+                newValue = suspend {
+                    val targetPage = pagerState.settledPage + 1
+                    if (uiState.isPaginating || targetPage !in uiState.pages.indices) {
+                        false
+                    } else {
+                        turnReaderPagerToPage(
+                            targetPage = targetPage,
+                            pageAnimation = effectivePageAnimation,
+                            scrollToPage = { animated ->
+                                if (animated) {
+                                    pagerState.animateScrollToPage(targetPage)
+                                } else {
+                                    pagerState.scrollToPage(targetPage)
+                                }
+                            },
+                            onPageChanged = onPageChanged,
+                        )
+                        true
+                    }
+                },
+            )
+            val autoPageController = remember(uiState.book?.id) {
+                ReaderAutoPageController(coroutineScope) { autoPageAdvance.value() }
+            }
+            pauseAutoPage = autoPageController::pause
+            val autoPageState by autoPageController.state.collectAsStateWithLifecycle()
+            val stopTimerController = remember(uiState.book?.id) {
+                ReaderStopTimerController(coroutineScope) {
+                    autoPageController.pause()
+                    ttsController.stop()
+                    speechSession.active = false
+                    speechSession.requestedOffset = null
+                    temporarilyDisableKeepScreenOn = true
+                    stopTimerNoticeToken += 1
+                }
+            }
+            val stopTimerState by stopTimerController.state.collectAsStateWithLifecycle()
+            LaunchedEffect(stopTimerNoticeToken) {
+                if (stopTimerNoticeToken > 0) {
+                    navigationSnackbar.showSnackbar("定时已到，已停止朗读和自动翻页")
+                }
+            }
+            LaunchedEffect(
+                stopTimerState.deadlineElapsedRealtime,
+                stopTimerState.isForeground,
+            ) {
+                while (stopTimerController.state.value.isActive &&
+                    stopTimerController.state.value.isForeground
+                ) {
+                    delay(1_000L)
+                    stopTimerController.refresh()
+                }
+            }
+            DisposableEffect(lifecycleOwner, autoPageController, stopTimerController) {
+                val observer = LifecycleEventObserver { _, event ->
+                    when (event) {
+                        Lifecycle.Event.ON_START -> stopTimerController.onForeground()
+                        Lifecycle.Event.ON_STOP -> {
+                            autoPageController.pause()
+                            stopTimerController.onBackground()
+                        }
+                        else -> Unit
+                    }
+                }
+                lifecycleOwner.lifecycle.addObserver(observer)
+                if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+                    stopTimerController.onForeground()
+                }
+                onDispose {
+                    lifecycleOwner.lifecycle.removeObserver(observer)
+                    autoPageController.close()
+                    stopTimerController.close()
+                }
+            }
+            LaunchedEffect(controlsVisible, activePanel) {
+                if (controlsVisible || activePanel != null) autoPageController.pause()
             }
             DisposableEffect(
                 registerVolumePageTurnHandler,
@@ -626,28 +771,37 @@ private fun ReaderScreenWithAppearance(
                 }
                 onDispose { registerVolumePageTurnHandler(null) }
             }
-            fun speakPage(pageIndex: Int) {
-                val page = uiState.pages.getOrNull(pageIndex) ?: run {
-                    ttsActive = false
-                    return
-                }
-                val text = uiState.textFor(page)
-                ttsController.speak(text) {
-                    val nextPage = pageIndex + 1
-                    if (ttsActive && nextPage in uiState.pages.indices) {
-                        ttsRequestedPage = nextPage
-                        turnToPage(nextPage, false)
+            fun speakSegment(segment: ReaderSpeechSegment) {
+                val onComplete = speechSession.beginSegment(segment)
+                ttsController.speak(segment.text, onComplete = onComplete, onFailure = { message ->
+                    speechSession.active = false
+                    speechSession.requestedOffset = null
+                    coroutineScope.launch { navigationSnackbar.showSnackbar(message) }
+                })
+            }
+            LaunchedEffect(speechSession.requestedOffset, uiState.pages, uiState.isPaginating, speechSession.active) {
+                val requested = speechSession.requestedOffset
+                if (speechSession.active && requested != null && !uiState.isPaginating) {
+                    if (requested >= uiState.contentLength || uiState.navigationErrorMessage != null) {
+                        speechSession.active = false
+                        speechSession.requestedOffset = null
                     } else {
-                        ttsActive = false
-                        ttsRequestedPage = null
+                        val segment = uiState.speechSegmentAt(requested)
+                        if (segment != null) {
+                            speechSession.requestedOffset = null
+                            speakSegment(segment)
+                        }
+                        onSpeechPosition(requested)
                     }
                 }
             }
-            LaunchedEffect(ttsRequestedPage, pagerState.settledPage, ttsActive) {
-                val requested = ttsRequestedPage
-                if (ttsActive && requested != null && pagerState.settledPage == requested) {
-                    ttsRequestedPage = null
-                    speakPage(requested)
+            LaunchedEffect(uiState.anchorOffset, uiState.isPaginating) {
+                val spoken = speechSession.spokenRange
+                if (speechSession.active && !uiState.isPaginating && spoken != null &&
+                    speechSession.requestedOffset == null && uiState.anchorOffset !in spoken
+                ) {
+                    ttsController.stop()
+                    speechSession.active = false
                 }
             }
             LaunchedEffect(uiState.pages, uiState.currentPageIndex) {
@@ -658,7 +812,9 @@ private fun ReaderScreenWithAppearance(
             }
             LaunchedEffect(pagerState, uiState.pages.size) {
                 pagerState.interactionSource.interactions.collect { interaction ->
+                    if (interaction is DragInteraction.Start) stopSpeech()
                     if (interaction is DragInteraction.Stop || interaction is DragInteraction.Cancel) {
+                        pauseAutoPage()
                         snapshotFlow { pagerState.isScrollInProgress }.first { !it }
                         if (pagerState.settledPage in uiState.pages.indices) {
                             onPageChanged(pagerState.settledPage)
@@ -766,7 +922,9 @@ private fun ReaderScreenWithAppearance(
                                 tapInputEnabled = contentInputEnabled,
                                 selectionEnabled = !touchLocked && !controlsVisible && !uiState.isPaginating,
                                 isCurrentPage = pagerState.settledPage == index,
+                                onTouchStart = { pauseAutoPage() },
                                 onTapAction = { action ->
+                                    pauseAutoPage()
                                     when (action) {
                                         ReaderTapAction.PREVIOUS_PAGE -> turnToPage(index - 1, true)
                                         ReaderTapAction.NEXT_PAGE -> turnToPage(index + 1, true)
@@ -777,8 +935,12 @@ private fun ReaderScreenWithAppearance(
                                         ReaderTapAction.NONE -> Unit
                                     }
                                 },
-                                onSelectionActiveChanged = { selectionActive = it },
+                                onSelectionActiveChanged = {
+                                    selectionActive = it
+                                    if (it) pauseAutoPage()
+                                },
                                 onSelectionAction = { selection, action ->
+                                    pauseAutoPage()
                                     onUserInteraction()
                                     when (action) {
                                         ReaderSelectionAction.Bookmark -> onAddAnnotation(
@@ -821,6 +983,7 @@ private fun ReaderScreenWithAppearance(
                         currentBrightness = uiState.settings.brightness,
                         enabled = contentInputEnabled,
                         onPreview = { value ->
+                            pauseAutoPage()
                             brightnessPreview = value
                             applyReaderBrightness(context, value)
                         },
@@ -873,6 +1036,22 @@ private fun ReaderScreenWithAppearance(
                                 contentDescription = "隐藏阅读菜单"
                                 role = Role.Button
                             }
+                            .pointerInput(pagerState, uiState.pages.size) {
+                                var distance = 0f
+                                detectHorizontalDragGestures(
+                                    onDragStart = { distance = 0f },
+                                    onHorizontalDrag = { change, amount ->
+                                        change.consume()
+                                        distance += amount
+                                    },
+                                    onDragEnd = {
+                                        if (kotlin.math.abs(distance) >= menuSwipeThreshold) {
+                                            controlsVisible = false
+                                            turnToPage(pagerState.currentPage + if (distance < 0) 1 else -1, true)
+                                        }
+                                    },
+                                )
+                            }
                             .clickable { controlsVisible = false },
                     )
                 }
@@ -885,6 +1064,11 @@ private fun ReaderScreenWithAppearance(
                 ) {
                     ReaderControls(
                         title = uiState.book?.title.orEmpty(),
+                        canReturnToChapterOrigin = uiState.canReturnToOrigin && !uiState.isBrowsingTemporarily,
+                        onReturnToChapterOrigin = {
+                            stopSpeech(); onReturnToOrigin()
+                            controlsVisible = false
+                        },
                         chapterTitle = positionInfo.chapterTitle,
                         bookProgressPercent = positionInfo.bookProgressPercent,
                         onBack = onBack,
@@ -893,6 +1077,7 @@ private fun ReaderScreenWithAppearance(
                         onOpenProgress = { activePanel = ReaderPanel.PROGRESS },
                         onOpenSearch = { activePanel = ReaderPanel.SEARCH },
                         onOpenSettings = {
+                            controlsVisible = false
                             appearanceCommitRequested = false
                             onBeginAppearanceEdit(ReaderSettingsScope.GLOBAL)
                             activePanel = ReaderPanel.SETTINGS
@@ -902,7 +1087,7 @@ private fun ReaderScreenWithAppearance(
                         isBookmarked = uiState.pages.getOrNull(pagerState.currentPage)?.let { page ->
                             uiState.bookmarks.any { it.offset == page.startOffset.toLong() }
                         } == true,
-                        isSpeaking = ttsActive,
+                        isSpeaking = speechSession.active,
                         onLockTouch = {
                             controlsVisible = false
                             touchLocked = true
@@ -910,14 +1095,33 @@ private fun ReaderScreenWithAppearance(
                         backgroundColor = palette.background,
                         contentColor = palette.content,
                         onToggleSpeech = {
-                            if (ttsActive) {
+                            pauseAutoPage()
+                            if (speechSession.active) {
                                 ttsController.stop()
-                                ttsActive = false
-                                ttsRequestedPage = null
+                                speechSession.active = false
+                                speechSession.requestedOffset = null
                             } else {
-                                ttsActive = true
-                                speakPage(pagerState.currentPage)
+                                uiState.pages.getOrNull(pagerState.currentPage)?.let { speechSession.start(it.startOffset) }
                             }
+                        },
+                        autoPageState = autoPageState,
+                        onStartAutoPage = { intervalSeconds ->
+                            ttsController.stop()
+                            speechSession.active = false
+                            speechSession.requestedOffset = null
+                            autoPageController.start(intervalSeconds)
+                            controlsVisible = false
+                        },
+                        onPauseAutoPage = autoPageController::pause,
+                        stopTimerState = stopTimerState,
+                        onSetStopTimer = { minutes ->
+                            temporarilyDisableKeepScreenOn = false
+                            stopTimerController.start(minutes)
+                            controlsVisible = false
+                        },
+                        onCancelStopTimer = {
+                            stopTimerController.cancel()
+                            temporarilyDisableKeepScreenOn = false
                         },
                     )
                 }
@@ -979,8 +1183,9 @@ private fun ReaderScreenWithAppearance(
                 ) {
                     TemporaryBrowsingBar(
                         canNavigateBack = uiState.canNavigateBack,
-                        onNavigateBack = onNavigateBack,
-                        onReturnToOrigin = onReturnToOrigin,
+                        canContinue = !uiState.isPaginating,
+                        onNavigateBack = { stopSpeech(); onNavigateBack() },
+                        onReturnToOrigin = { stopSpeech(); onReturnToOrigin() },
                         onContinueFromHere = onContinueFromHere,
                     )
                 }
@@ -995,6 +1200,10 @@ private fun ReaderScreenWithAppearance(
                 if (touchLocked) {
                     TouchLockOverlay(onUnlock = { touchLocked = false })
                 }
+                SnackbarHost(
+                    hostState = navigationSnackbar,
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 40.dp),
+                )
             }
 
             when (activePanel) {
@@ -1008,11 +1217,13 @@ private fun ReaderScreenWithAppearance(
                     initialTab = navigationTab,
                     onTabChanged = { navigationTab = it },
                     onSelectChapter = { chapter ->
-                        onJumpTemporarily(chapter.startOffset, ReaderJumpReason.CHAPTER)
+                        stopSpeech()
+                        onJumpToChapter(chapter.startOffset)
                         activePanel = null
                         controlsVisible = false
                     },
                     onSelectBookmark = { bookmark ->
+                        stopSpeech()
                         onJumpTemporarily(bookmark.offset.toInt(), ReaderJumpReason.BOOKMARK)
                         activePanel = null
                         controlsVisible = false
@@ -1026,7 +1237,8 @@ private fun ReaderScreenWithAppearance(
                     manuallyEdited = uiState.chaptersManuallyEdited,
                     isAnalyzing = uiState.isAnalyzingChapters,
                     onSelect = { chapter ->
-                        onJumpTemporarily(chapter.startOffset, ReaderJumpReason.CHAPTER)
+                        stopSpeech()
+                        onJumpToChapter(chapter.startOffset)
                         activePanel = null
                     },
                     onReanalyze = onReanalyzeChapters,
@@ -1038,6 +1250,7 @@ private fun ReaderScreenWithAppearance(
                 )
                 ReaderPanel.SEARCH -> SearchDialog(
                     results = uiState.searchResults,
+                    errorMessage = uiState.searchErrorMessage,
                     chapters = uiState.chapters,
                     indexState = uiState.searchIndexState,
                     contentLength = uiState.contentLength,
@@ -1046,26 +1259,31 @@ private fun ReaderScreenWithAppearance(
                     onRebuildIndex = onRebuildSearchIndex,
                     onCancelIndex = onCancelSearchIndex,
                     onSelect = { result ->
+                        stopSpeech()
                         onJumpTemporarily(result.offset, ReaderJumpReason.SEARCH)
                         activePanel = null
                     },
                     onDismiss = { activePanel = null },
                 )
-                ReaderPanel.PROGRESS -> ProgressDialog(
+                ReaderPanel.PROGRESS -> ReaderPageJumpDialog(
+                    pages = uiState.bookPages,
                     anchorOffset = uiState.anchorOffset,
-                    contentLength = uiState.contentLength,
                     chapters = uiState.chapters,
-                    preview = uiState.progressPreview,
-                    isLoading = uiState.isProgressPreviewLoading,
-                    onPreview = onPreviewProgress,
-                    onCommit = {
-                        onCommitProgressPreview()
+                    isLoading = uiState.isIndexingBookPages,
+                    progress = uiState.bookPageIndexProgress,
+                    error = uiState.bookPageIndexError,
+                    onRetry = onPrepareBookPageIndex,
+                    onJump = { page ->
+                        stopSpeech()
+                        onJumpToBookPage(page)
                         activePanel = null
+                        controlsVisible = false
                     },
-                    onDismiss = {
-                        onCancelProgressPreview()
-                        activePanel = null
+                    onOpenDirectory = {
+                        navigationTab = ReaderNavigationTab.CHAPTERS
+                        activePanel = ReaderPanel.NAVIGATION
                     },
+                    onDismiss = { activePanel = null },
                 )
                 ReaderPanel.SETTINGS -> uiState.appearanceEdit?.let { edit ->
                     ReaderSettingsSheet(
@@ -1109,6 +1327,7 @@ private fun ReaderScreenWithAppearance(
                 ReaderPanel.NOTES -> ReaderAnnotationPanel(
                     annotations = uiState.annotations,
                     onSelect = { annotation ->
+                        stopSpeech()
                         onJumpTemporarily(
                             annotation.range.startOffset.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
                             ReaderJumpReason.ANNOTATION,
@@ -1162,11 +1381,13 @@ private fun ReaderScreenWithAppearance(
             }
         }
     }
+    }
 }
 
 @Composable
 private fun TemporaryBrowsingBar(
     canNavigateBack: Boolean,
+    canContinue: Boolean,
     onNavigateBack: () -> Unit,
     onReturnToOrigin: () -> Unit,
     onContinueFromHere: () -> Unit,
@@ -1191,8 +1412,9 @@ private fun TemporaryBrowsingBar(
                 enabled = canNavigateBack,
                 modifier = Modifier.heightIn(min = 48.dp),
             ) { Text("后退") }
-            Button(
+            Button(shape = MaterialTheme.shapes.medium,
                 onClick = onContinueFromHere,
+                enabled = canContinue,
                 modifier = Modifier.heightIn(min = 48.dp),
             ) { Text("从这里继续") }
         }
@@ -1338,9 +1560,19 @@ internal fun ReaderControls(
     backgroundColor: Color,
     contentColor: Color,
     onToggleSpeech: () -> Unit,
+    autoPageState: ReaderAutoPageState = ReaderAutoPageState(),
+    onStartAutoPage: (Int) -> Unit = {},
+    onPauseAutoPage: () -> Unit = {},
+    stopTimerState: ReaderStopTimerState = ReaderStopTimerState(),
+    onSetStopTimer: (Int) -> Unit = {},
+    onCancelStopTimer: () -> Unit = {},
+    canReturnToChapterOrigin: Boolean = false,
+    onReturnToChapterOrigin: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var moreExpanded by remember { mutableStateOf(false) }
+    var autoPageDialogVisible by remember { mutableStateOf(false) }
+    var stopTimerDialogVisible by remember { mutableStateOf(false) }
     Box(modifier = modifier.fillMaxSize()) {
         Surface(
             modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth(),
@@ -1397,7 +1629,7 @@ internal fun ReaderControls(
                             },
                         )
                         DropdownMenuItem(
-                            text = { Text("定位进度") },
+                            text = { Text("跳转位置") },
                             onClick = {
                                 moreExpanded = false
                                 onOpenProgress()
@@ -1416,6 +1648,28 @@ internal fun ReaderControls(
                                 )
                             },
                         )
+                        DropdownMenuItem(
+                            text = { Text("自动翻页") },
+                            onClick = {
+                                moreExpanded = false
+                                autoPageDialogVisible = true
+                            },
+                            trailingIcon = {
+                                Text(readerAutoPageStatusText(autoPageState))
+                            },
+                            modifier = Modifier.testTag("reader-menu-auto-page"),
+                        )
+                        DropdownMenuItem(
+                            text = { Text("定时停止") },
+                            onClick = {
+                                moreExpanded = false
+                                stopTimerDialogVisible = true
+                            },
+                            trailingIcon = {
+                                Text(readerStopTimerStatusText(stopTimerState))
+                            },
+                            modifier = Modifier.testTag("reader-menu-stop-timer"),
+                        )
                     }
                 }
             }
@@ -1433,6 +1687,13 @@ internal fun ReaderControls(
                     )
                     .padding(horizontal = 12.dp, vertical = 4.dp),
             ) {
+                if (canReturnToChapterOrigin) {
+                    TextButton(
+                        onClick = onReturnToChapterOrigin,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                            .testTag("reader-return-chapter-origin"),
+                    ) { Text(stringResource(R.string.reader_return_before_chapter)) }
+                }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1501,8 +1762,159 @@ internal fun ReaderControls(
                 }
             }
         }
+        if (autoPageDialogVisible) {
+            ReaderAutoPageDialog(
+                state = autoPageState,
+                onStart = onStartAutoPage,
+                onPause = onPauseAutoPage,
+                onDismiss = { autoPageDialogVisible = false },
+            )
+        }
+        if (stopTimerDialogVisible) {
+            ReaderStopTimerDialog(
+                state = stopTimerState,
+                onSetTimer = onSetStopTimer,
+                onCancelTimer = onCancelStopTimer,
+                onDismiss = { stopTimerDialogVisible = false },
+            )
+        }
     }
 }
+
+@Composable
+private fun ReaderAutoPageDialog(
+    state: ReaderAutoPageState,
+    onStart: (Int) -> Unit,
+    onPause: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var selectedInterval by remember(state.intervalSeconds) {
+        mutableStateOf(state.intervalSeconds)
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("自动翻页") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("选择自动翻到下一页的间隔")
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    READER_AUTO_PAGE_INTERVALS_SECONDS.forEach { seconds ->
+                        val selected = selectedInterval == seconds
+                        TextButton(
+                            onClick = { selectedInterval = seconds },
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .testTag("reader-auto-page-interval-$seconds"),
+                        ) {
+                            Text(
+                                text = if (selected) "✓ ${seconds}秒" else "${seconds}秒",
+                                color = if (selected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                        }
+                    }
+                }
+                Text(
+                    text = if (state.isRunning) {
+                        "自动翻页进行中，触摸正文、手势、打开菜单或进入后台会暂停。"
+                    } else {
+                        "自动翻页不会追赶错过的间隔，也不会在后台翻页。"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            Button(shape = MaterialTheme.shapes.medium,
+                onClick = {
+                    if (state.isRunning) onPause() else onStart(selectedInterval)
+                    onDismiss()
+                },
+                modifier = Modifier.heightIn(min = 48.dp),
+            ) {
+                Text(if (state.isRunning) "暂停" else "开始")
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.heightIn(min = 48.dp),
+            ) { Text("关闭") }
+        },
+    )
+}
+
+@Composable
+private fun ReaderStopTimerDialog(
+    state: ReaderStopTimerState,
+    onSetTimer: (Int) -> Unit,
+    onCancelTimer: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("定时停止") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = if (state.isActive) {
+                        "当前${readerStopTimerStatusText(state)}，到时停止朗读和自动翻页，暂时关闭保持亮屏。"
+                    } else {
+                        "到时停止朗读和自动翻页，暂时关闭保持亮屏；阅读进度不会改变。"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    READER_STOP_TIMER_MINUTES.forEach { minutes ->
+                        TextButton(
+                            onClick = {
+                                onSetTimer(minutes)
+                                onDismiss()
+                            },
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .testTag("reader-stop-timer-$minutes"),
+                        ) { Text("${minutes}分钟") }
+                    }
+                }
+                if (state.isActive) {
+                    TextButton(
+                        onClick = {
+                            onCancelTimer()
+                            onDismiss()
+                        },
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    ) { Text("取消定时") }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.heightIn(min = 48.dp),
+            ) { Text("关闭") }
+        },
+    )
+}
+
+private fun readerAutoPageStatusText(state: ReaderAutoPageState): String =
+    if (state.isRunning) "进行中 · ${state.intervalSeconds}秒" else "已暂停 · ${state.intervalSeconds}秒"
+
+private fun readerStopTimerStatusText(state: ReaderStopTimerState): String =
+    state.remainingMillis?.let { remaining ->
+        val totalSeconds = (remaining + 999L) / 1_000L
+        String.format(Locale.ROOT, "剩余 %02d:%02d", totalSeconds / 60, totalSeconds % 60)
+    } ?: "未设置"
 
 @Composable
 private fun RowScope.ReaderMenuActionButton(
@@ -1566,90 +1978,9 @@ private fun ReaderMenuIconButton(
 }
 
 @Composable
-private fun ProgressDialog(
-    anchorOffset: Int,
-    contentLength: Long,
-    chapters: List<DetectedChapter>,
-    preview: ReaderPositionPreview?,
-    isLoading: Boolean,
-    onPreview: (Float) -> Unit,
-    onCommit: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val safeLength = contentLength.coerceAtLeast(0)
-    var fraction by remember(anchorOffset, safeLength) {
-        mutableStateOf(
-            if (safeLength == 0L) 0f else (anchorOffset.toDouble() / safeLength).toFloat().coerceIn(0f, 1f),
-        )
-    }
-    val targetOffset = readerProgressOffset(fraction, safeLength)
-    val targetInfo = readerPositionInfo(targetOffset, safeLength, chapters)
-    LaunchedEffect(anchorOffset, safeLength) {
-        if (safeLength > 0) onPreview(fraction)
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("阅读进度") },
-        text = {
-            Column {
-                val chapterTitle = preview?.chapterTitle ?: targetInfo.chapterTitle
-                val percent = preview?.percent ?: targetInfo.bookProgressPercent
-                Text("$chapterTitle · 全书 $percent%")
-                Slider(
-                    value = fraction,
-                    onValueChange = {
-                        fraction = it
-                        onPreview(it)
-                    },
-                    onValueChangeFinished = {
-                        if (!isLoading && preview != null) onCommit()
-                    },
-                    valueRange = 0f..1f,
-                    enabled = safeLength > 0,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 12.dp)
-                        .testTag("reader-progress-slider"),
-                )
-                if (isLoading) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 8.dp)
-                            .testTag("reader-progress-preview-loading"),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        CircularProgressIndicator(modifier = Modifier.width(20.dp).height(20.dp))
-                        Text("正在读取目标位置…", style = MaterialTheme.typography.bodySmall)
-                    }
-                } else if (preview != null) {
-                    Text(
-                        text = preview.snippet.ifBlank { "目标位置附近没有可预览文字" },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 8.dp)
-                            .testTag("reader-progress-preview-snippet"),
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = onCommit,
-                enabled = safeLength > 0 && preview != null && !isLoading,
-            ) { Text("跳转") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
-    )
-}
-
-@Composable
 internal fun SearchDialog(
     results: List<ReaderSearchResult>,
+    errorMessage: String? = null,
     chapters: List<DetectedChapter>,
     indexState: com.xinyue.reader.core.domain.model.BookSearchIndexState?,
     contentLength: Long,
@@ -1671,11 +2002,11 @@ internal fun SearchDialog(
                     val percent = if (contentLength > 0) {
                         (indexState.indexedUtf16Length * 100 / contentLength).coerceIn(0, 100)
                     } else 0
-                    "正在建立中文索引 $percent%"
+                    "正在准备搜索 $percent%"
                 }
-                BookSearchIndexStatus.READY -> "中文索引已就绪"
-                BookSearchIndexStatus.ERROR -> indexState.errorMessage ?: "索引建立失败"
-                else -> "正在准备中文索引"
+                BookSearchIndexStatus.READY -> "搜索已准备"
+                BookSearchIndexStatus.ERROR -> indexState.errorMessage ?: "搜索准备失败"
+                else -> "正在准备搜索"
             }
             LazyColumn(
                 modifier = Modifier
@@ -1693,7 +2024,7 @@ internal fun SearchDialog(
                         Text(statusText, style = MaterialTheme.typography.bodySmall)
                         if (indexState?.status == BookSearchIndexStatus.BUILDING) {
                             TextButton(onClick = onCancelIndex) { Text("取消") }
-                        } else {
+                        } else if (indexState?.status == BookSearchIndexStatus.ERROR) {
                             TextButton(onClick = onRebuildIndex) { Text("重建索引") }
                         }
                     }
@@ -1711,20 +2042,24 @@ internal fun SearchDialog(
                     )
                 }
                 item {
-                    Button(
+                    Button(shape = MaterialTheme.shapes.medium,
                         onClick = {
                             submittedQuery = query
                             onSearch(query)
                         },
-                        enabled = query.codePointCount(0, query.length) >= 2 && !isSearching,
+                        enabled = query.trim().let { it.codePointCount(0, it.length) >= 2 } && !isSearching,
                         modifier = Modifier.padding(top = 8.dp).testTag("reader-search-submit"),
                     ) { Text("搜索") }
                 }
                 if (isSearching) {
                     item { CircularProgressIndicator(modifier = Modifier.padding(12.dp)) }
                 }
+                if (errorMessage != null) {
+                    item { Text(errorMessage, color = MaterialTheme.colorScheme.error) }
+                }
                 if (
                     !isSearching &&
+                    errorMessage == null &&
                     submittedQuery.isNotBlank() &&
                     indexState?.status == BookSearchIndexStatus.READY &&
                     results.isEmpty()
@@ -2020,13 +2355,16 @@ internal fun readerUsesDarkSystemBarIcons(settings: ReaderSettings): Boolean =
     com.xinyue.reader.core.domain.model.ReaderColorContrast.isLight(readerEffectiveBackgroundArgb(settings))
 
 @Composable
-private fun ReaderWindowEffects(settings: ReaderSettings) {
+private fun ReaderWindowEffects(
+    settings: ReaderSettings,
+    temporarilyDisableKeepScreenOn: Boolean = false,
+) {
     val view = LocalView.current
-    DisposableEffect(view, settings.brightness, settings.keepScreenOn) {
+    DisposableEffect(view, settings.brightness, settings.keepScreenOn, temporarilyDisableKeepScreenOn) {
         val window = view.context.findActivity()?.window
         val originalBrightness = window?.attributes?.screenBrightness
         val originalKeepScreenOn = view.keepScreenOn
-        view.keepScreenOn = settings.keepScreenOn
+        view.keepScreenOn = settings.keepScreenOn && !temporarilyDisableKeepScreenOn
         if (window != null) {
             val attributes = window.attributes
             attributes.screenBrightness = settings.brightness
@@ -2119,7 +2457,6 @@ private fun applyReaderBrightness(context: Context, brightness: Float) {
 private val MAX_READER_COLUMN_WIDTH = 720.dp
 private val BRIGHTNESS_GESTURE_WIDTH = 44.dp
 private const val MIN_READER_BRIGHTNESS = 0.02f
-private const val CONTROLS_AUTO_HIDE_MILLIS = 4_000L
 private const val CLOCK_REFRESH_MILLIS = 15_000L
 private const val BATTERY_REFRESH_MILLIS = 60_000L
 private const val PERFORMANCE_NOTICE_MILLIS = 2_800L

@@ -2,6 +2,8 @@ package com.xinyue.reader.core.data
 
 import java.io.File
 import java.security.MessageDigest
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 
 class RestoreRecovery(
     private val privateRoot: File,
@@ -19,11 +21,13 @@ class RestoreRecovery(
         when (journal.phase) {
             RestorePhase.PREPARED,
             RestorePhase.FILES_PUBLISHED,
+            RestorePhase.ROLLBACK_PENDING,
             -> rollback(journal)
 
             RestorePhase.DATABASE_COMMITTED -> reconcileCommitted(journal)
             RestorePhase.VERIFIED,
             RestorePhase.CLEANUP_PENDING,
+            RestorePhase.ROLLED_BACK,
             -> cleanupNewState(journal)
 
             RestorePhase.COMPLETED -> require(journalStore.delete(journal.operationId)) { "无法删除已完成恢复 journal" }
@@ -47,15 +51,17 @@ class RestoreRecovery(
         }
     }
 
-    private suspend fun rollback(journal: RestoreJournal) {
+    private suspend fun rollback(journal: RestoreJournal) = withContext(NonCancellable) {
+        journalStore.write(journal.copy(phase = RestorePhase.ROLLBACK_PENDING))
         val snapshotRoot = BackupPathPolicy.resolve(privateRoot, journal.snapshotRoot)
         val snapshot = snapshotStore.load(snapshotRoot)
-        database.replaceAll(snapshot.catalog)
+        if (database.snapshot().canonicalForRestore() != snapshot.catalog.canonicalForRestore()) {
+            database.replaceAll(snapshot.catalog)
+        }
+        require(database.snapshot().canonicalForRestore() == snapshot.catalog.canonicalForRestore())
         snapshotStore.rollbackFiles(snapshot)
-        require(snapshotStore.cleanup(snapshot)) { "恢复回滚快照清理失败" }
-        val stagedRoot = BackupPathPolicy.resolve(privateRoot, journal.stagedRoot)
-        require(!stagedRoot.exists() || stagedRoot.deleteRecursively()) { "恢复回滚暂存清理失败" }
-        require(journalStore.delete(journal.operationId)) { "恢复回滚 journal 清理失败" }
+        journalStore.write(journal.copy(phase = RestorePhase.ROLLED_BACK))
+        cleanupNewState(journal.copy(phase = RestorePhase.ROLLED_BACK))
     }
 
     private fun cleanupNewState(journal: RestoreJournal) {

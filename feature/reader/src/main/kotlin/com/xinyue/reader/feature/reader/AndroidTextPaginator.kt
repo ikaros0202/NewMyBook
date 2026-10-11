@@ -114,7 +114,7 @@ class AndroidTextPaginator @Inject constructor(
             val paint = TextPaint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
                 styledTextFactory.configurePaint(this, spec)
             }
-            val lineSpacingAdd = spec.lineHeightPx - paint.fontSpacing
+            val lineSpacingAdd = styledTextFactory.lineSpacingAdd(paint, spec)
             val pages = ArrayList<ReaderPage>(((rangeEnd - rangeStart) / 600).coerceAtLeast(1))
             val estimatedCharactersPerPage = (
                 (spec.widthPx / spec.fontSizePx) * (spec.heightPx / spec.lineHeightPx)
@@ -126,31 +126,15 @@ class AndroidTextPaginator @Inject constructor(
                 currentCoroutineContext().ensureActive()
                 var chunkEnd = (start + measureWindow).coerceAtMost(rangeEnd)
                 chunkEnd = avoidSplittingSurrogate(text, start, chunkEnd)
-                val chunk = text.substring(start, chunkEnd)
-                val chunkTitleRanges = titleRanges.intersectingTitleRanges(
-                    textStartOffset = start.toLong(),
-                    textEndOffset = chunkEnd.toLong(),
-                )
-                val styledChunk = styledTextFactory.create(
-                    text = chunk,
+                val layout = buildLayout(
+                    text = text,
+                    start = start,
+                    end = chunkEnd,
                     spec = spec,
-                    textStartOffset = start.toLong(),
-                    titleRanges = chunkTitleRanges,
-                    firstParagraphIsContinuation = start > 0 && text[start - 1] != '\n',
-                    lastParagraphIsContinuation = chunkEnd < text.length && text[chunkEnd - 1] != '\n',
+                    paint = paint,
+                    lineSpacingAdd = lineSpacingAdd,
+                    titleRanges = titleRanges,
                 )
-                val layout = StaticLayout.Builder.obtain(styledChunk, 0, styledChunk.length, paint, spec.widthPx)
-                    .setAlignment(spec.alignment.toLayoutAlignment())
-                    .setIncludePad(false)
-                    .setLineSpacing(lineSpacingAdd, 1f)
-                    .setJustificationMode(
-                        if (spec.alignment == ReaderTextAlignment.JUSTIFY) {
-                            Layout.JUSTIFICATION_MODE_INTER_WORD
-                        } else {
-                            Layout.JUSTIFICATION_MODE_NONE
-                        },
-                    )
-                    .build()
 
                 var lineIndex = layout.getLineForVertical((spec.heightPx - 1).coerceAtLeast(0))
                     .coerceIn(0, layout.lineCount - 1)
@@ -162,6 +146,15 @@ class AndroidTextPaginator @Inject constructor(
                 if (end <= start) {
                     end = start + Character.charCount(text.codePointAt(start))
                 }
+                end = fitRenderedPageEnd(
+                    text = text,
+                    spec = spec,
+                    paint = paint,
+                    lineSpacingAdd = lineSpacingAdd,
+                    start = start,
+                    candidateEnd = end,
+                    titleRanges = titleRanges,
+                )
 
                 pages += ReaderPage(
                     startOffset = start,
@@ -171,6 +164,99 @@ class AndroidTextPaginator @Inject constructor(
             }
             pages
         }
+
+    private fun buildLayout(
+        text: String,
+        start: Int,
+        end: Int,
+        spec: ReaderLayoutSpec,
+        paint: TextPaint,
+        lineSpacingAdd: Float,
+        titleRanges: List<ReaderChapterTitleRange>,
+    ): StaticLayout {
+        val styledText = styledTextFactory.create(
+            text = text.substring(start, end),
+            spec = spec,
+            textStartOffset = start.toLong(),
+            titleRanges = titleRanges.intersectingTitleRanges(
+                textStartOffset = start.toLong(),
+                textEndOffset = end.toLong(),
+            ),
+            firstParagraphIsContinuation = start > 0 && text[start - 1] != '\n',
+            lastParagraphIsContinuation = end < text.length && text[end - 1] != '\n',
+        )
+        return ReaderTextLayoutPolicy.configure(
+            StaticLayout.Builder.obtain(styledText, 0, styledText.length, paint, spec.widthPx),
+        )
+            .setAlignment(spec.alignment.toLayoutAlignment())
+            .setIncludePad(false)
+            .setLineSpacing(lineSpacingAdd, 1f)
+            .setJustificationMode(
+                if (spec.alignment == ReaderTextAlignment.JUSTIFY) {
+                    Layout.JUSTIFICATION_MODE_INTER_WORD
+                } else {
+                    Layout.JUSTIFICATION_MODE_NONE
+                },
+            )
+            .build()
+    }
+
+    /**
+     * The chunk layout also contains following text, while the page is rendered as an
+     * independent TextView fragment. Re-measure that exact fragment and remove only its
+     * overflowing final line until it fits the same pixel viewport.
+     */
+    private fun fitRenderedPageEnd(
+        text: String,
+        spec: ReaderLayoutSpec,
+        paint: TextPaint,
+        lineSpacingAdd: Float,
+        start: Int,
+        candidateEnd: Int,
+        titleRanges: List<ReaderChapterTitleRange>,
+    ): Int {
+        var end = candidateEnd.coerceIn(start + 1, text.length)
+        while (true) {
+            val pageLayout = buildLayout(
+                text = text,
+                start = start,
+                end = end,
+                spec = spec,
+                paint = paint,
+                lineSpacingAdd = lineSpacingAdd,
+                titleRanges = titleRanges,
+            )
+            val lastLine = pageLayout.lineCount - 1
+            if (lastLine < 0 || pageLayout.getLineBottom(lastLine) <= spec.heightPx) {
+                return end
+            }
+
+            val lineStartOffset = start + pageLayout.getLineStart(lastLine)
+            val previousCodePoint = previousCodePointStart(text, end)
+            val nextEnd = if (lineStartOffset in (start + 1) until end) {
+                lineStartOffset
+            } else {
+                previousCodePoint
+            }
+            if (nextEnd <= start) {
+                return start + Character.charCount(text.codePointAt(start))
+            }
+            end = avoidSplittingSurrogate(text, start, nextEnd)
+        }
+    }
+
+    private fun previousCodePointStart(text: String, endExclusive: Int): Int {
+        val safeEnd = endExclusive.coerceIn(1, text.length)
+        return if (
+            safeEnd >= 2 &&
+            text[safeEnd - 2].isHighSurrogate() &&
+            text[safeEnd - 1].isLowSurrogate()
+        ) {
+            safeEnd - 2
+        } else {
+            safeEnd - 1
+        }
+    }
 
     private fun avoidSplittingSurrogate(text: String, start: Int, proposedEnd: Int): Int {
         var end = proposedEnd

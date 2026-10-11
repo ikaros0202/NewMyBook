@@ -1,37 +1,50 @@
 package com.xinyue.reader.feature.reader
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.FilterChip
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.xinyue.reader.core.domain.model.ReaderColorTheme
-import com.xinyue.reader.core.domain.model.ReaderFontRef
-import com.xinyue.reader.core.domain.model.ReaderPageAnimation
 import com.xinyue.reader.core.domain.model.ReaderSettings
+import com.xinyue.reader.core.ui.XinYueIcons
 import java.util.Locale
 
-/**
- * The high-frequency reader settings surface. It only renders a draft and emits changes;
- * persistence and navigation remain owned by the caller.
- */
+/** Compact draft controls; the caller owns preview, persistence and advanced settings. */
 @Composable
 internal fun ReaderQuickSettings(
     settings: ReaderSettings,
@@ -41,293 +54,320 @@ internal fun ReaderQuickSettings(
     onSettingsChange: (ReaderSettings) -> Unit,
     onMoreSettings: () -> Unit,
 ) {
-    val safeSettings = settings.normalized()
+    val safe = settings.normalized()
+    val fontSizeDescription = stringResource(R.string.reader_font_size)
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(16.dp)
+            .padding(horizontal = 16.dp)
             .testTag("reader-quick-settings"),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        QuickSection("reader-quick-settings-scope", "作用范围") {
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                QuickChoice(
-                    label = "全局默认",
-                    selected = scope == ReaderSettingsScope.GLOBAL,
-                    tag = "reader-quick-settings-scope-global",
-                    onClick = { onScopeChanged(ReaderSettingsScope.GLOBAL) },
-                )
-                QuickChoice(
-                    label = "当前书籍",
-                    selected = scope == ReaderSettingsScope.CURRENT_BOOK,
-                    tag = "reader-quick-settings-scope-current-book",
-                    onClick = { onScopeChanged(ReaderSettingsScope.CURRENT_BOOK) },
-                )
-                if (scope == ReaderSettingsScope.CURRENT_BOOK) {
-                    Text(
-                        text = "翻页方式与亮度沿用全局默认",
-                        modifier = Modifier.testTag("reader-quick-settings-global-only-note"),
-                    )
-                }
-            }
-        }
-
-        QuickSlider(
-            sectionTag = "reader-quick-settings-font-size",
-            sliderTag = "reader-quick-settings-font-size-slider",
-            label = "字号",
-            value = safeSettings.fontSizeSp,
-            valueText = "${formatQuick(safeSettings.fontSizeSp, 1)} sp",
-            range = 14f..36f,
-            steps = 21,
-            onValueChange = { onSettingsChange(safeSettings.copy(fontSizeSp = it)) },
+        ReaderScopeSelector(
+            scope = scope,
+            onScopeChanged = onScopeChanged,
         )
-
-        QuickSlider(
-            sectionTag = "reader-quick-settings-line-height",
-            sliderTag = "reader-quick-settings-line-height-slider",
-            label = "行高",
-            value = safeSettings.lineHeightMultiplier,
-            valueText = "${formatQuick(safeSettings.lineHeightMultiplier, 2)} 倍",
-            range = ReaderSettings.MIN_LINE_HEIGHT_MULTIPLIER..ReaderSettings.MAX_LINE_HEIGHT_MULTIPLIER,
-            steps = 23,
-            onValueChange = { onSettingsChange(safeSettings.copy(lineHeightMultiplier = it)) },
-        )
-
-        QuickSlider(
-            sectionTag = "reader-quick-settings-paragraph-spacing",
-            sliderTag = "reader-quick-settings-paragraph-spacing-slider",
-            label = "段间距",
-            value = safeSettings.paragraphSpacingEm,
-            valueText = "${formatQuick(safeSettings.paragraphSpacingEm, 2)} em",
-            range = ReaderSettings.MIN_PARAGRAPH_SPACING_EM..ReaderSettings.MAX_PARAGRAPH_SPACING_EM,
-            steps = 19,
-            onValueChange = { onSettingsChange(safeSettings.copy(paragraphSpacingEm = it)) },
-        )
-
-        QuickSection("reader-quick-settings-indent", "首行缩进") {
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                listOf(0f, 1f, 2f).forEach { indent ->
-                    QuickChoice(
-                        label = "${formatQuick(indent, 0)}em",
-                        selected = safeSettings.firstLineIndentEm == indent,
-                        tag = "reader-quick-settings-indent-${indent.toInt()}",
-                        onClick = { onSettingsChange(safeSettings.copy(firstLineIndentEm = indent)) },
-                    )
-                }
-            }
-        }
-
-        if (scope == ReaderSettingsScope.GLOBAL) {
-            QuickSection("reader-quick-settings-page-method", "翻页方式") {
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    ReaderPageAnimation.entries.forEach { animation ->
-                        QuickChoice(
-                            label = animation.quickLabel(),
-                            selected = safeSettings.pageAnimation == animation,
-                            tag = "reader-quick-settings-page-${animation.name.lowercase(Locale.ROOT)}",
-                            onClick = { onSettingsChange(safeSettings.copy(pageAnimation = animation)) },
-                        )
-                    }
-                }
-            }
-        }
-
-        QuickSection("reader-quick-settings-font", "字体") {
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                listOf(
-                    ReaderFontRef.System to ("系统" to "system"),
-                    ReaderFontRef.Serif to ("宋体" to "serif"),
-                    ReaderFontRef.SansSerif to ("黑体" to "sans-serif"),
-                ).forEach { (font, labelAndTag) ->
-                    val (label, tagName) = labelAndTag
-                    QuickChoice(
-                        label = label,
-                        selected = safeSettings.font == font,
-                        tag = "reader-quick-settings-font-$tagName",
-                        onClick = { onSettingsChange(safeSettings.copy(font = font)) },
-                    )
-                }
-            }
-        }
-
-        QuickSection("reader-quick-settings-theme-brightness", "主题与亮度") {
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                ReaderColorTheme.entries.forEach { theme ->
-                    QuickChoice(
-                        label = theme.quickLabel(),
-                        selected = safeSettings.matchesBuiltInPalette(theme),
-                        tag = "reader-quick-settings-theme-${theme.name.lowercase(Locale.ROOT)}",
-                        onClick = { onSettingsChange(safeSettings.withBuiltInPalette(theme)) },
-                    )
-                }
-            }
-            if (scope == ReaderSettingsScope.GLOBAL) {
-                val brightness = safeSettings.brightness
-                Text(
-                    if (brightness < 0f) {
-                        "亮度：跟随系统"
-                    } else {
-                        "亮度：${(brightness * 100).toInt()}%"
-                    },
-                )
-                QuickSliderTarget(
-                    value = if (brightness < 0f) 0.5f else brightness,
-                    onValueChange = { onSettingsChange(safeSettings.copy(brightness = it)) },
-                    valueRange = 0.02f..1f,
-                    enabled = brightness >= 0f,
-                    tag = "reader-quick-settings-brightness-slider",
-                    description = "亮度",
-                )
-                TextButton(
-                    onClick = {
-                        onSettingsChange(safeSettings.copy(brightness = if (brightness < 0f) 0.5f else -1f))
-                    },
-                    modifier = Modifier
-                        .heightIn(min = 48.dp)
-                        .testTag("reader-quick-settings-brightness-toggle"),
-                ) {
-                    Text(if (brightness < 0f) "使用独立亮度" else "恢复跟随系统")
-                }
-            }
-        }
-
-        QuickSection("reader-quick-settings-more-section", "") {
-            OutlinedButton(
-                onClick = onMoreSettings,
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 56.dp)
+                .testTag("reader-quick-settings-font-size-slider")
+                .semantics(mergeDescendants = true) {
+                    contentDescription = fontSizeDescription
+                    stateDescription = safe.fontSizeSp.formatSp()
+                },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("字号", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+            TextButton(
+                onClick = {
+                    onSettingsChange(safe.copy(fontSizeSp = (safe.fontSizeSp - 1f).coerceAtLeast(14f)))
+                },
+                enabled = safe.fontSizeSp > 14f,
                 modifier = Modifier
-                    .fillMaxWidth()
                     .heightIn(min = 48.dp)
-                    .testTag("reader-quick-settings-more"),
-            ) {
-                Text("更多设置")
+                    .semantics { contentDescription = "减小字号" }
+                    .testTag("reader-quick-settings-font-size-decrease"),
+            ) { Text("A−", style = MaterialTheme.typography.titleMedium) }
+            Text(
+                text = safe.fontSizeSp.formatSp(),
+                modifier = Modifier.padding(horizontal = 4.dp),
+                style = MaterialTheme.typography.titleSmall,
+                textAlign = TextAlign.Center,
+            )
+            TextButton(
+                onClick = {
+                    onSettingsChange(safe.copy(fontSizeSp = (safe.fontSizeSp + 1f).coerceAtMost(36f)))
+                },
+                enabled = safe.fontSizeSp < 36f,
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .semantics { contentDescription = "增大字号" }
+                    .testTag("reader-quick-settings-font-size-increase"),
+            ) { Text("A+", style = MaterialTheme.typography.titleMedium) }
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("reader-quick-settings-theme-brightness"),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            ReaderColorTheme.entries.forEach { theme ->
+                QuickThemeChoice(
+                    theme = theme,
+                    label = stringResource(theme.quickLabelResource()),
+                    selected = safe.matchesBuiltInPalette(theme),
+                    tag = "reader-quick-settings-theme-${theme.name.lowercase(Locale.ROOT)}",
+                    modifier = Modifier.weight(1f),
+                    onClick = { onSettingsChange(safe.withBuiltInPalette(theme)) },
+                )
             }
+        }
+        if (scope == ReaderSettingsScope.GLOBAL) {
+            ReaderBrightnessControl(
+                settings = safe,
+                onSettingsChange = onSettingsChange,
+            )
+        } else {
+            Text(
+                stringResource(R.string.reader_quick_global_note),
+                modifier = Modifier.testTag("reader-quick-settings-global-only-note"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 52.dp)
+                .clickable(onClick = onMoreSettings)
+                .testTag("reader-quick-settings-more"),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "更多阅读设置",
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Icon(
+                painter = painterResource(XinYueIcons.ChevronRight),
+                contentDescription = null,
+                modifier = Modifier.size(24.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
 
+/** Shared brightness row for quick and full/global reader settings. */
 @Composable
-private fun QuickSection(
-    tag: String,
-    title: String,
-    content: @Composable ColumnScope.() -> Unit,
+internal fun ReaderBrightnessControl(
+    settings: ReaderSettings,
+    onSettingsChange: (ReaderSettings) -> Unit,
 ) {
-    Column(
-        modifier = Modifier.fillMaxWidth().testTag(tag),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-        content = {
-            if (title.isNotEmpty()) {
-                Text(title, style = MaterialTheme.typography.titleSmall)
-            }
-            content()
-        },
-    )
-}
-
-@Composable
-private fun QuickSlider(
-    sectionTag: String,
-    sliderTag: String,
-    label: String,
-    value: Float,
-    valueText: String,
-    range: ClosedFloatingPointRange<Float>,
-    steps: Int,
-    onValueChange: (Float) -> Unit,
-) {
-    QuickSection(sectionTag, "") {
-        Text("$label：$valueText")
-        QuickSliderTarget(
-            value = value.coerceIn(range.start, range.endInclusive),
-            onValueChange = onValueChange,
-            valueRange = range,
-            steps = steps,
-            tag = sliderTag,
-            description = "$label：$valueText",
-        )
-    }
-}
-
-@Composable
-private fun QuickSliderTarget(
-    value: Float,
-    onValueChange: (Float) -> Unit,
-    valueRange: ClosedFloatingPointRange<Float>,
-    steps: Int = 0,
-    enabled: Boolean = true,
-    tag: String,
-    description: String,
-) {
-    Box(
+    val brightness = settings.brightness
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 48.dp),
-        contentAlignment = Alignment.Center,
+            .heightIn(min = 56.dp)
+            .testTag("reader-quick-settings-brightness"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Slider(
-            value = value,
-            onValueChange = onValueChange,
-            valueRange = valueRange,
-            steps = steps,
-            enabled = enabled,
+        Text("亮度", style = MaterialTheme.typography.bodyMedium)
+        if (brightness < 0f) {
+            Text(
+                "跟随系统",
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            ReaderSettingSlider(
+                value = brightness,
+                onValueChange = { onSettingsChange(settings.copy(brightness = it)) },
+                valueRange = 0.02f..1f,
+                steps = 0,
+                contentDescription = "亮度，${(brightness * 100).toInt()}%",
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("reader-quick-settings-brightness-slider"),
+            )
+        }
+        TextButton(
+            onClick = {
+                onSettingsChange(settings.copy(brightness = if (brightness < 0f) 0.5f else -1f))
+            },
+            modifier = Modifier
+                .heightIn(min = 48.dp)
+                .testTag("reader-quick-settings-brightness-toggle")
+                .semantics {
+                    stateDescription = if (brightness < 0f) "跟随系统" else "自定义亮度"
+                },
+        ) {
+            Text(if (brightness < 0f) "自定义" else "跟随系统")
+        }
+    }
+}
+
+/**
+ * The scope control is shared by the compact and full appearance surfaces so both use the
+ * same vocabulary, hit target, and menu semantics.
+ */
+@Composable
+internal fun ReaderScopeSelector(
+    scope: ReaderSettingsScope,
+    onScopeChanged: (ReaderSettingsScope) -> Unit,
+    modifier: Modifier = Modifier,
+    includeCurrentBook: Boolean = true,
+    testTagPrefix: String = "reader-quick-settings-scope",
+) {
+    var scopeMenuExpanded by remember { mutableStateOf(false) }
+    val scopeLabel = if (scope == ReaderSettingsScope.GLOBAL) {
+        stringResource(R.string.reader_scope_global)
+    } else {
+        stringResource(R.string.reader_scope_book)
+    }
+    val selectedTag = if (scope == ReaderSettingsScope.GLOBAL) {
+        "$testTagPrefix-global"
+    } else {
+        "$testTagPrefix-current-book"
+    }
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag(testTagPrefix),
+    ) {
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 48.dp)
-                .testTag(tag)
-                .semantics { contentDescription = description },
-        )
+                .clickable { scopeMenuExpanded = true }
+                .testTag(selectedTag)
+                .semantics {
+                    stateDescription = scopeLabel
+                    contentDescription = "作用范围，$scopeLabel"
+                },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                "作用范围",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                scopeLabel,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Icon(
+                painter = painterResource(XinYueIcons.ChevronRight),
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        DropdownMenu(
+            expanded = scopeMenuExpanded,
+            onDismissRequest = { scopeMenuExpanded = false },
+        ) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.reader_scope_global)) },
+                onClick = {
+                    scopeMenuExpanded = false
+                    onScopeChanged(ReaderSettingsScope.GLOBAL)
+                },
+                trailingIcon = if (scope == ReaderSettingsScope.GLOBAL) {
+                    { Text("✓") }
+                } else {
+                    null
+                },
+                modifier = Modifier
+                    .testTag("$testTagPrefix-global-option")
+                    .semantics { selected = scope == ReaderSettingsScope.GLOBAL },
+            )
+            if (includeCurrentBook) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.reader_scope_book)) },
+                    onClick = {
+                        scopeMenuExpanded = false
+                        onScopeChanged(ReaderSettingsScope.CURRENT_BOOK)
+                    },
+                    trailingIcon = if (scope == ReaderSettingsScope.CURRENT_BOOK) {
+                        { Text("✓") }
+                    } else {
+                        null
+                    },
+                    modifier = Modifier
+                        .testTag("$testTagPrefix-current-book-option")
+                        .semantics { selected = scope == ReaderSettingsScope.CURRENT_BOOK },
+                )
+            }
+        }
     }
 }
 
 @Composable
-private fun QuickChoice(
+private fun QuickThemeChoice(
+    theme: ReaderColorTheme,
     label: String,
     selected: Boolean,
     tag: String,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    FilterChip(
-        selected = selected,
-        onClick = onClick,
-        label = { Text(label) },
-        modifier = Modifier
-            .heightIn(min = 48.dp)
+    val palette = theme.builtInPalette()
+    Column(
+        modifier = modifier
+            .heightIn(min = 72.dp)
+            .selectable(
+                selected = selected,
+                role = Role.RadioButton,
+                onClick = onClick,
+            )
             .testTag(tag)
             .semantics {
+                this.selected = selected
                 contentDescription = label
-                stateDescription = if (selected) "已选择" else "未选择"
             },
-    )
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(Color(palette.backgroundArgb.toInt()))
+                .border(
+                    width = if (selected) 2.dp else 1.dp,
+                    color = if (selected) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.outlineVariant
+                    },
+                    shape = CircleShape,
+                ),
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+        )
+    }
 }
 
-private fun ReaderPageAnimation.quickLabel(): String = when (this) {
-    ReaderPageAnimation.SLIDE -> "滑动"
-    ReaderPageAnimation.COVER -> "覆盖"
-    ReaderPageAnimation.NONE -> "无动画"
-}
+private fun Float.formatSp(): String =
+    if (this % 1f == 0f) "${toInt()}" else "%.1f".format(Locale.ROOT, this)
 
-private fun ReaderColorTheme.quickLabel(): String = when (this) {
-    ReaderColorTheme.PAPER -> "纸张"
-    ReaderColorTheme.SEPIA -> "棕褐"
-    ReaderColorTheme.GREEN -> "护眼"
-    ReaderColorTheme.DARK -> "深灰"
-    ReaderColorTheme.OLED_BLACK -> "纯黑"
+private fun ReaderColorTheme.quickLabelResource(): Int = when (this) {
+    ReaderColorTheme.PAPER -> R.string.reader_quick_paper
+    ReaderColorTheme.SEPIA -> R.string.reader_quick_sepia
+    ReaderColorTheme.GREEN -> R.string.reader_quick_green
+    ReaderColorTheme.DARK -> R.string.reader_quick_dark
+    ReaderColorTheme.OLED_BLACK -> R.string.reader_quick_black
 }
-
-private fun formatQuick(value: Float, decimals: Int): String =
-    String.format(Locale.ROOT, "%.${decimals}f", value)

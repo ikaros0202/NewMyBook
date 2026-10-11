@@ -1,6 +1,6 @@
 # 公开源码与私人资料
 
-更新：2026-09-29。应用运行时的数据处理见 [隐私说明](PRIVACY.md)。本页用于准备公开源码，不是每次开发都要执行的检查清单。
+更新：2026-10-11。应用运行时的数据处理见 [隐私说明](PRIVACY.md)。本页用于准备公开源码，不是每次开发都要执行的检查清单。
 
 ## 新基线的公开范围
 
@@ -13,13 +13,13 @@
 
 ## 私人资料
 
-私人 TXT、字体、备份及其正文、文件名、路径、唯一指纹、原始 XML、日志和截图保存在仓库外的 `XINYUE_PRIVATE_QA_ROOT`。凭据、签名密钥、Cookie 和访问令牌不进入项目文档或公开文件；本机 SDK 配置等通过被忽略的本地配置或环境变量提供。
+私人 TXT、字体、备份及其正文、文件名、路径、唯一指纹、原始 XML、日志和截图可保存在项目内被 Git 忽略的 `private-local/qa/`。`XINYUE_PRIVATE_QA_ROOT` 指向其中的私人回归资料目录，不再要求位于仓库外。凭据、签名密钥、Cookie 和访问令牌不进入项目文档或公开文件；本机 SDK 配置等通过被忽略的本地配置或环境变量提供。
 
-若处理既有私人来源资料，先在仓库外保存并校验原件，再生成只包含必要结论的脱敏记录。无法可靠脱敏的内容不公开。
+若处理既有私人来源资料，先在被 Git 忽略的本机私人资料目录保存并校验原件，再生成只包含必要结论的脱敏记录。无法可靠脱敏的内容不公开。
 
 ## 上传前检查
 
-对实际待公开文件执行检查，私人标记清单由仓库外的 `XINYUE_PRIVATE_DENYLIST` 提供：
+对实际待公开文件执行检查，私人标记清单由 `XINYUE_PRIVATE_DENYLIST` 提供，可指向 `private-local/qa/` 内被忽略的本机文件：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify-public-repo.ps1 -PrivateDenylistPath $env:XINYUE_PRIVATE_DENYLIST

@@ -5,13 +5,13 @@ import org.junit.Test
 
 class GeneratedBookCoverTest {
     @Test
-    fun `formats four Chinese characters as a balanced two by two mark`() {
-        assertThat(bookCoverLabel("雾港来信")).isEqualTo("雾港\n来信")
+    fun `keeps the complete Chinese title`() {
+        assertThat(bookCoverLabel("雾港来信")).isEqualTo("雾港来信")
     }
 
     @Test
-    fun `uses initials instead of wrapping a long latin filename`() {
-        assertThat(bookCoverLabel("performance-large")).isEqualTo("PL")
-        assertThat(bookCoverLabel("A Long Journey")).isEqualTo("ALJ")
+    fun `keeps the complete latin title`() {
+        assertThat(bookCoverLabel("performance-large")).isEqualTo("performance-large")
+        assertThat(bookCoverLabel("A Long Journey")).isEqualTo("A Long Journey")
     }
 }

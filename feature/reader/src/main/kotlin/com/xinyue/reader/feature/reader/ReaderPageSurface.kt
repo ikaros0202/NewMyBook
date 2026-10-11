@@ -91,6 +91,7 @@ internal fun ReaderPageSurface(
     onTapAction: (ReaderTapAction) -> Unit,
     onSelectionActiveChanged: (Boolean) -> Unit,
     onSelectionAction: (ReaderSelection, ReaderSelectionAction) -> Unit,
+    onTouchStart: () -> Unit = {},
     sourceText: String = text,
     chapterTitleRanges: List<ReaderChapterTitleRange> = emptyList(),
     modifier: Modifier = Modifier,
@@ -124,6 +125,7 @@ internal fun ReaderPageSurface(
                 view.isEnabled = selectionEnabled
                 view.isCurrentPage = isCurrentPage
                 view.onTapAction = onTapAction
+                view.onTouchStart = onTouchStart
                 view.onSelectionActiveChanged = { active ->
                     selectionActive = active
                     onSelectionActiveChanged(active)
@@ -175,6 +177,7 @@ internal class ReaderSelectableTextView(context: Context) : TextView(context) {
     var tapInputEnabled: Boolean = true
     var isCurrentPage: Boolean = false
     var onTapAction: (ReaderTapAction) -> Unit = {}
+    var onTouchStart: () -> Unit = {}
     var onSelectionActiveChanged: (Boolean) -> Unit = {}
     var onSelectionAction: (ReaderSelection, ReaderSelectionAction) -> Unit = { _, _ -> }
     var focusBandSettings: ReaderFocusBandSettings = ReaderFocusBandSettings()
@@ -297,6 +300,7 @@ internal class ReaderSelectableTextView(context: Context) : TextView(context) {
         backgroundColorArgb: Int,
         styledTextFactory: ReaderStyledTextFactory,
     ) {
+        ReaderTextLayoutPolicy.configure(this)
         val presentationKey = ReaderPagePresentationKey(
             spec = spec,
             contentColorArgb = contentColorArgb,
@@ -309,7 +313,7 @@ internal class ReaderSelectableTextView(context: Context) : TextView(context) {
         setTextSize(TypedValue.COMPLEX_UNIT_PX, spec.fontSizePx)
         letterSpacing = spec.letterSpacingEm
         typeface = styledTextFactory.resolveTypeface(spec)
-        setLineSpacing(spec.lineHeightPx - paint.fontSpacing, 1f)
+        setLineSpacing(styledTextFactory.lineSpacingAdd(paint, spec), 1f)
         justificationMode = if (spec.alignment == ReaderTextAlignment.JUSTIFY) {
             android.text.Layout.JUSTIFICATION_MODE_INTER_WORD
         } else {
@@ -384,6 +388,9 @@ internal class ReaderSelectableTextView(context: Context) : TextView(context) {
                 pageTurnInputEnabledAtDown = tapInputEnabled
                 selectionWasActiveAtDown = selectionStart != selectionEnd || selectionActionMode != null
                 pendingSwipeAction = null
+                if (pageTurnInputEnabledAtDown) {
+                    onTouchStart()
+                }
                 if (pageTurnInputEnabledAtDown && !selectionWasActiveAtDown) {
                     parent?.requestDisallowInterceptTouchEvent(true)
                 }

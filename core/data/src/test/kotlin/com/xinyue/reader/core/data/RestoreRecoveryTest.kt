@@ -21,6 +21,25 @@ class RestoreRecoveryTest {
     @get:Rule val temporaryFolder = TemporaryFolder()
 
     @Test
+    fun `rolled back cleanup resumes without a remaining snapshot`() = runTest {
+        val fixture = fixture("rollback-cleanup", RestoreFaultPoint.AFTER_FIRST_FILE_PUBLISHED)
+        runCatching { fixture.publisher.publish(fixture.prepared, fixture.request) }
+        val journal = fixture.journals.read("operation-1")!!
+        fixture.database.state = fixture.oldCatalog
+        fixture.target.writeText("old-public-content")
+        fixture.journals.write(journal.copy(phase = RestorePhase.ROLLED_BACK))
+        assertThat(File(fixture.root, journal.snapshotRoot).deleteRecursively()).isTrue()
+
+        fixture.recovery.reconcile()
+        fixture.recovery.reconcile()
+
+        assertThat(fixture.database.state).isEqualTo(fixture.oldCatalog)
+        assertThat(fixture.target.readText()).isEqualTo("old-public-content")
+        assertThat(fixture.journals.list()).isEmpty()
+        assertThat(fixture.prepared.staged.stagingRoot.exists()).isFalse()
+    }
+
+    @Test
     fun `process death before durable commit phase rolls database and files back idempotently`() = runTest {
         for (point in listOf(RestoreFaultPoint.AFTER_FIRST_FILE_PUBLISHED, RestoreFaultPoint.AFTER_DATABASE_COMMIT)) {
             val fixture = fixture("rollback-${point.name}", point)

@@ -12,7 +12,7 @@ enum class ChapterRuleSet {
 }
 
 object ChapterDetector {
-    private const val MAX_TITLE_CHARACTERS = 80
+    internal const val MAX_TITLE_CHARACTERS = 80
     private const val CHINESE_NUMBER = "0-9零一二三四五六七八九十百千万两〇○"
     private const val HORIZONTAL_SPACE = "\\t \\u3000"
     private const val ORDINAL_HEADING =

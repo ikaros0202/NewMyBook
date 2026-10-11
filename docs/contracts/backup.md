@@ -29,6 +29,17 @@
 | 快照、发布、验证与回滚 | [`RestorePublisher.kt`](../../core/data/src/main/kotlin/com/xinyue/reader/core/data/RestorePublisher.kt)、[`RestoreSnapshotStore.kt`](../../core/data/src/main/kotlin/com/xinyue/reader/core/data/RestoreSnapshotStore.kt)、[`BackupEquivalenceVerifier.kt`](../../core/data/src/main/kotlin/com/xinyue/reader/core/data/BackupEquivalenceVerifier.kt) | [`RestorePublisherTest`](../../core/data/src/test/kotlin/com/xinyue/reader/core/data/RestorePublisherTest.kt)、[`BackupEquivalenceVerifierTest`](../../core/data/src/test/kotlin/com/xinyue/reader/core/data/BackupEquivalenceVerifierTest.kt) |
 | 中断后的启动协调 | [`RestoreRecovery.kt`](../../core/data/src/main/kotlin/com/xinyue/reader/core/data/RestoreRecovery.kt)、[`RestoreJournalStore.kt`](../../core/data/src/main/kotlin/com/xinyue/reader/core/data/RestoreJournalStore.kt) | [`RestoreRecoveryTest`](../../core/data/src/test/kotlin/com/xinyue/reader/core/data/RestoreRecoveryTest.kt)、[`BackupRecoveryForceStopInstrumentedTest`](../../app/src/androidTest/kotlin/com/xinyue/reader/BackupRecoveryForceStopInstrumentedTest.kt) |
 
+## 当前功能入口
+
+设置首页的“备份与恢复”进入 [`BackupRoute`](../../feature/backup/src/main/kotlin/com/xinyue/reader/feature/backup/BackupScreen.kt)。页面按用途列出两组功能：
+
+- **整个书架：** 导出备份、从备份恢复。
+- **笔记与单书：** 导出全部批注（Markdown 或 JSON，可选包含书签）、导出单书接力包、应用阅读接力包。
+
+每项仍通过系统文件选择器选择输入或输出位置；入口整理没有改变归档格式、恢复令牌或数据所有权。
+
+恢复冲突预览中的书籍展示标签使用“书名 + 日期”帮助用户区分条目，不再把内部 UUID 直接作为主要可见标签。UUID、内容哈希和其他内部身份仍按原有规则参与匹配、冲突判断和恢复；这只是可读性改进，不改变恢复策略、归档格式或数据身份。
+
 ## 必须保持的语义
 
 - `inspect` 只验证、暂存并生成预览，不修改当前书架；`restore` 只能使用预览返回的 staged token。
@@ -42,6 +53,7 @@
 - 数据库和文件系统没有共同事务；恢复必须通过暂存、快照、持久日志、分阶段发布、验证和补偿协调。
 - 应用启动先协调未完成恢复，再启动普通文件清理。
 - 进度回调与错误信息不得包含私人正文、字体内容或外部 URI。
+- 冲突预览可以用书名和日期作为用户可读标签，但不能用该标签替代内部书籍身份、内容哈希或冲突匹配键。
 - schema、逻辑目录或 `formatVersion` 变化是兼容性决策，必须同步迁移/兼容性测试，并更新当前基线和架构说明。
 
 ## 何时联动其他能力页

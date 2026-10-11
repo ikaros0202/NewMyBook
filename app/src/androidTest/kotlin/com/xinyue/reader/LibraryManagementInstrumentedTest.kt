@@ -2,6 +2,9 @@ package com.xinyue.reader
 
 import androidx.activity.compose.setContent
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithTag
@@ -69,9 +72,12 @@ class LibraryManagementInstrumentedTest {
         )
 
         compose.onNodeWithTag("library-selection-bar").assertIsDisplayed()
+        compose.onNode(hasText("集合") and hasAnyAncestor(hasTestTag("library-selection-bar"))).performClick()
         compose.onNodeWithText("移动到").performClick()
         compose.onAllNodesWithText("测试分组")[1].performClick()
+        compose.onNodeWithText("状态").performClick()
         compose.onNodeWithText("标记已读完").performClick()
+        compose.onNodeWithText("状态").performClick()
         compose.onNodeWithText("取消已读完").performClick()
         compose.onNodeWithText("删除").performClick()
 

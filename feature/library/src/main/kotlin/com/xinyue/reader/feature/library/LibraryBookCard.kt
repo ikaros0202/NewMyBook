@@ -17,7 +17,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.Surface
@@ -26,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
@@ -33,6 +33,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
 import com.xinyue.reader.core.domain.model.Book
 import com.xinyue.reader.core.domain.model.LibraryLayoutMode
@@ -119,29 +120,29 @@ private fun CompactListBookCard(
             ),
         shape = MaterialTheme.shapes.medium,
         color = if (selected) {
-            MaterialTheme.colorScheme.primaryContainer
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.62f)
         } else {
-            MaterialTheme.colorScheme.surfaceContainerLow
+            Color.Transparent
         },
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 82.dp)
-                .padding(horizontal = 8.dp, vertical = 6.dp),
+                .heightIn(min = 100.dp)
+                .padding(horizontal = 6.dp, vertical = 7.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            BookCover(book = book, modifier = Modifier.width(44.dp).height(66.dp))
+            BookCover(book = book, modifier = Modifier.width(56.dp).height(84.dp))
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = book.title,
                         style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
+                        fontWeight = FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier
@@ -154,7 +155,7 @@ private fun CompactListBookCard(
                             text = "继续",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold,
+                            fontWeight = FontWeight.Medium,
                             modifier = Modifier.padding(start = 6.dp),
                         )
                     }
@@ -163,25 +164,15 @@ private fun CompactListBookCard(
                     Text(
                         text = secondary,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = if (book.finished) "已读完" else libraryProgressLabel(safeProgress),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
-                LinearProgressIndicator(
-                    progress = { safeProgress.toFloat() },
-                    modifier = Modifier.fillMaxWidth().height(2.dp),
+                Text(
+                    text = if (book.finished) "已读完" else libraryProgressLabel(safeProgress),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.82f),
                 )
             }
             BookMenuAnchor(
@@ -189,6 +180,10 @@ private fun CompactListBookCard(
                 visible = !selectionMode,
                 expanded = menuExpanded,
                 onExpandedChange = onMenuExpandedChange,
+                onSelect = {
+                    onMenuExpandedChange(false)
+                    onEnterSelection()
+                },
                 onEdit = onEdit,
                 onStatistics = onStatistics,
                 onDelete = onDelete,
@@ -228,40 +223,20 @@ private fun CoverGridBookCard(
     ) {
         Column(
             modifier = Modifier.padding(if (selected) 4.dp else 0.dp),
-            verticalArrangement = Arrangement.spacedBy(5.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Box(modifier = Modifier.fillMaxWidth().aspectRatio(2f / 3f)) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(2f / 3f)
+                    .shadow(1.dp, RoundedCornerShape(4.dp), clip = false),
+            ) {
                 BookCover(book = book, modifier = Modifier.fillMaxSize())
-                if (showContinue) {
-                    Surface(
-                        modifier = Modifier.align(Alignment.TopStart).padding(5.dp),
-                        shape = MaterialTheme.shapes.small,
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                    ) {
-                        Text(
-                            text = "继续",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
-                        )
-                    }
-                }
-                BookMenuAnchor(
-                    book = book,
-                    visible = !selectionMode,
-                    expanded = menuExpanded,
-                    onExpandedChange = onMenuExpandedChange,
-                    onEdit = onEdit,
-                    onStatistics = onStatistics,
-                    onDelete = onDelete,
-                    modifier = Modifier.align(Alignment.TopEnd),
-                )
             }
             Text(
                 text = book.title,
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
@@ -271,28 +246,41 @@ private fun CoverGridBookCard(
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = bookSecondaryLabel(book).orEmpty(),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                Column(
                     modifier = Modifier.weight(1f),
-                )
-                Text(
-                    text = if (book.finished) "已读" else "${(safeProgress * 100).toInt()}%",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(1.dp),
+                ) {
+                    bookSecondaryLabel(book)?.let { secondary ->
+                        Text(
+                            text = secondary,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Text(
+                        text = libraryGridProgressLabel(book, safeProgress, showContinue),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f),
+                    )
+                }
+                BookMenuAnchor(
+                    book = book,
+                    visible = !selectionMode,
+                    expanded = menuExpanded,
+                    onExpandedChange = onMenuExpandedChange,
+                    onSelect = {
+                        onMenuExpandedChange(false)
+                        onEnterSelection()
+                    },
+                    onEdit = onEdit,
+                    onStatistics = onStatistics,
+                    onDelete = onDelete,
                 )
             }
-            LinearProgressIndicator(
-                progress = { safeProgress.toFloat() },
-                modifier = Modifier.fillMaxWidth().height(2.dp),
-            )
         }
     }
 }
@@ -303,6 +291,7 @@ private fun BookMenuAnchor(
     visible: Boolean,
     expanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
+    onSelect: () -> Unit,
     onEdit: () -> Unit,
     onStatistics: () -> Unit,
     onDelete: () -> Unit,
@@ -330,6 +319,11 @@ private fun BookMenuAnchor(
             modifier = Modifier.testTag("library_book_menu_${book.id}"),
         ) {
             DropdownMenuItem(
+                text = { Text("选择") },
+                onClick = onSelect,
+                modifier = Modifier.testTag("library_book_select_${book.id}"),
+            )
+            DropdownMenuItem(
                 text = { Text("编辑") },
                 onClick = onEdit,
                 modifier = Modifier.testTag("library_book_edit_${book.id}"),
@@ -352,3 +346,17 @@ private fun BookMenuAnchor(
 private fun bookSecondaryLabel(book: Book): String? =
     book.author?.takeIf(String::isNotBlank)
         ?: book.seriesName?.takeIf(String::isNotBlank)
+
+private fun libraryGridProgressLabel(
+    book: Book,
+    fraction: Double,
+    showContinue: Boolean,
+): String {
+    val safeFraction = fraction.coerceIn(0.0, 1.0)
+    val progress = when {
+        book.finished -> "已读"
+        safeFraction <= 0.0 -> "未读"
+        else -> libraryProgressLabel(safeFraction).removePrefix("阅读进度 ")
+    }
+    return if (showContinue && !book.finished) "继续 · $progress" else progress
+}

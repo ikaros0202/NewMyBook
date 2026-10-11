@@ -1,5 +1,6 @@
 package com.xinyue.reader.feature.library
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
@@ -17,6 +18,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -32,6 +35,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
@@ -41,6 +45,7 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xinyue.reader.core.ui.BookCover
+import com.xinyue.reader.core.ui.XinYueIcons
 
 @Composable
 fun StatisticsRoute(
@@ -50,10 +55,15 @@ fun StatisticsRoute(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     LaunchedEffect(bookId) { viewModel.selectBook(bookId) }
+    val hasSelectedBook = uiState.selectedBookId != null
+    val leaveBookStatistics = {
+        if (bookId != null) onBack() else viewModel.selectBook(null)
+    }
+    BackHandler(enabled = hasSelectedBook, onBack = leaveBookStatistics)
     StatisticsScreen(
         uiState = uiState,
-        onBack = onBack,
-        showBackButton = statisticsShowsBackButton(bookId),
+        onBack = leaveBookStatistics,
+        showBackButton = statisticsShowsBackButton(bookId) || hasSelectedBook,
         onSelectPeriod = viewModel::selectPeriod,
         onSelectBook = viewModel::selectBook,
         onRequestClear = viewModel::requestClear,
@@ -77,6 +87,13 @@ fun StatisticsScreen(
     showBackButton: Boolean = true,
 ) {
     val snackbar = remember { SnackbarHostState() }
+    val hasSessions = uiState.total.sessionCount > 0L ||
+        uiState.daily.any { it.sessionCount > 0L } ||
+        uiState.ranking.any { it.statistics.sessionCount > 0L }
+    val hasStatistics = uiState.total.activeMillis > 0L || hasSessions
+    val hasDailyReading = uiState.daily.any { it.activeMillis > 0L }
+    val hasDailySessions = uiState.daily.any { it.sessionCount > 0L }
+    val rankedBooks = uiState.ranking.filter { it.statistics.activeMillis > 0L }
     LaunchedEffect(uiState.errorMessage) {
         val error = uiState.errorMessage ?: return@LaunchedEffect
         snackbar.showSnackbar(error)
@@ -89,13 +106,22 @@ fun StatisticsScreen(
                 title = { Text(uiState.selectedBook?.let { "《${it.title}》统计" } ?: "阅读统计") },
                 navigationIcon = {
                     if (showBackButton) {
-                        TextButton(
+                        IconButton(
                             onClick = onBack,
                             modifier = Modifier.testTag("statistics_navigation_back"),
-                        ) { Text("返回") }
+                        ) {
+                            Icon(
+                                painter = painterResource(XinYueIcons.ArrowBack),
+                                contentDescription = "返回",
+                            )
+                        }
                     }
                 },
-                actions = { TextButton(onClick = onRequestClear) { Text("清除") } },
+                actions = {
+                    if (hasStatistics) {
+                        TextButton(onClick = onRequestClear) { Text("清除统计") }
+                    }
+                },
             )
         },
         snackbarHost = { SnackbarHost(snackbar) },
@@ -122,10 +148,19 @@ fun StatisticsScreen(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    val recent = uiState.daily.lastOrNull { it.activeMillis > 0 }
+                    val recent = uiState.daily.lastOrNull { it.sessionCount > 0L }
                     Text(
-                        text = recent?.let { "最近阅读：${it.date} · ${formatReadingDuration(it.activeMillis)}" }
-                            ?: "当前时段暂无阅读记录",
+                        text = recent?.let {
+                            if (it.activeMillis > 0L) {
+                                "最近阅读：${it.date} · ${formatReadingDuration(it.activeMillis)}"
+                            } else {
+                                "最近阅读：${it.date} · 暂无有效阅读时长"
+                            }
+                        } ?: if (hasSessions) {
+                            "已有阅读会话，暂无有效阅读时长"
+                        } else {
+                            "当前时段暂无阅读记录"
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -152,18 +187,34 @@ fun StatisticsScreen(
                             onSelectPeriod = onSelectPeriod,
                         )
                     }
-                    StatisticsChart(uiState.daily, Modifier.padding(top = 12.dp))
+                    if (hasDailyReading) {
+                        StatisticsChart(uiState.daily, Modifier.padding(top = 12.dp))
+                    } else {
+                        Text(
+                            text = if (hasDailySessions || hasSessions) "暂无有效阅读时长" else "暂无每日记录",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 20.dp),
+                        )
+                    }
                     HorizontalDivider(
                         modifier = Modifier.padding(top = 12.dp),
                         color = MaterialTheme.colorScheme.outlineVariant,
                     )
                 }
             }
-            if (uiState.selectedBookId != null) {
-                item { TextButton(onClick = { onSelectBook(null) }) { Text("查看全部书籍") } }
+            item {
+                Text("书籍排行", style = MaterialTheme.typography.titleMedium)
+                if (rankedBooks.isEmpty()) {
+                    Text(
+                        text = if (hasSessions) "暂无有效阅读时长" else "暂无书籍阅读记录",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
             }
-            item { Text("书籍排行", style = MaterialTheme.typography.titleMedium) }
-            items(uiState.ranking, key = { it.book.id }) { item ->
+            items(rankedBooks, key = { it.book.id }) { item ->
                 Surface(
                     onClick = { onSelectBook(item.book.id) },
                     modifier = Modifier.fillMaxWidth().testTag("statistics-book-${item.book.id}"),
@@ -194,11 +245,18 @@ fun StatisticsScreen(
                                     )
                                 }
                             }
-                            Text(
-                                text = formatReadingDuration(item.statistics.activeMillis),
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(
+                                    text = formatReadingDuration(item.statistics.activeMillis),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                                Text(
+                                    text = "查看",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
                         }
                         HorizontalDivider(
                             modifier = Modifier.padding(start = 52.dp),

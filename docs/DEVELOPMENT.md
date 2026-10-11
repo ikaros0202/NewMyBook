@@ -1,42 +1,16 @@
-# 新阅开发参考
+# 新阅开发基线
 
-本页是当前工作区的简短操作参考。当前产品基线见 [`BASELINE.md`](BASELINE.md)，当前任务和接力状态见 [`tasks/current.md`](../tasks/current.md)；本页不替代用户对任务范围和发布动作的决定。
+更新：2026-09-30。本页只留下少量现状信息，不规定开发流程。实现方案、工具、任务拆分、验证范围和交付方式，由具体对话结合当前代码决定。
 
-## 工具链
+新阅是安静、可靠的 Android 本地 TXT 阅读器，使用 Kotlin 和 Jetpack Compose。核心是清晰排版、顺畅翻页与可靠续读；保持离线，保护原始文件和用户已有数据。产品底线与用户明确固化的协作规范见根目录 [AGENTS.md](../AGENTS.md)，这里不重复增加约束。
 
-- 使用 JDK 17，并通过 `JAVA_HOME` 指向本机 JDK。
-- 使用 Android SDK 37，并通过 `ANDROID_SDK_ROOT` 指向本机 SDK。
-- 账号配置中的工作区路径通过 `XINYUE_WORKSPACE` 提供。
-- 使用仓库自带的 `gradlew.bat`，不要求项目内保存 Gradle、JDK 或 SDK 的绝对路径。
-- 设备交互回归默认使用项目现有的 `XinYue_API37` 16 KB 模拟器；设备结论只覆盖实际运行的环境。
+1.0.0 是统一起始基线，当前维护版本为 1.0.2 / versionCode 10。2026-10-11 用户授权提交源码、推送 GitHub 并构建本地 Release，交付与验证范围见 [Release 记录](../qa/current/1.0.2/release-2026-10-11/README.md)。源码配置和实际验证记录优先于文档里的版本描述；后续发布安排由当次对话确认。
 
-常用的环境检查和构建入口：
+需要接续时，只按问题查看对应入口：
 
-```powershell
-if (-not $env:JAVA_HOME) { throw 'JAVA_HOME must point to JDK 17' }
-if (-not $env:ANDROID_SDK_ROOT) { throw 'ANDROID_SDK_ROOT must point to Android SDK 37' }
-.\gradlew.bat --version
-```
+- [当前任务](../tasks/current.md)与[交接文档](HANDOFF.md)：正在做什么、已有决定和待完成项。
+- [产品基线](BASELINE.md)：当前能力概览。
+- [架构入口](architecture/README.md)与项目 Gradle 配置：理解实际代码和依赖。
+- [当前 QA](../qa/current/1.0.2/README.md)：已经验证的结果及限制。
 
-## 验证范围
-
-一次改动只验证新增代码、修改代码和直接受影响的调用链。纯 Kotlin 或文本算法优先运行对应模块的 JVM 测试；涉及 Android、文件、数据库或用户可见交互时，再增加对应的集成测试、迁移测试或 API 37 模拟器回归。没有相关改动时不例行执行全量测试。
-
-私人长篇 TXT 按风险决定是否补充回归。需要使用时，从 `XINYUE_PRIVATE_QA_ROOT` 指向的仓库外目录读取；正文、文件名、路径、指纹和原始设备证据不写入仓库。仓库内自动化优先使用合成或公开夹具。
-
-`qa/scripts/run-v1.6-api37-structured-txt.ps1` 是保留的历史结构化 TXT runner，会组合公开夹具和登记的私人用例，固定执行八项检查，不是普通改动的默认命令。`-PublicFixturePath`、`-PrivateRegistryPath` 用于指定输入，`-DryRun` 用于检查计划；它们不等于单项测试筛选。日常改动直接选择相关测试类或方法，只有确需覆盖这组场景时才使用该 runner。
-
-## 构建和发布
-
-构建目标跟随本次任务：只改 JVM 代码时不必构建 APK，只改 Android 资源时选择受影响的变体；需要发布或安装验证时，再执行目标 APK/AAB、签名/权限/隐私和安装启动检查。构建通过不能代替用户可见交互证据。
-
-当前源码基线按 [`BASELINE.md`](BASELINE.md) 记录为 1.0.0；暂不据此推断已经生成或发布安装包。Git 可按当前任务用于版本管理；GitHub 仓库重建和公开发布由主任务单独执行，本页不记录其完成状态。
-
-## 文档入口
-
-- 当前基线：[`BASELINE.md`](BASELINE.md)
-- 当前任务和交接：[`tasks/current.md`](../tasks/current.md)
-- 文档路由：[`docs/README.md`](README.md)
-- 当前实现架构：[`architecture/README.md`](architecture/README.md)
-- 运行时隐私：[`PRIVACY.md`](PRIVACY.md)
-- 公开发布时再读取：[`PUBLIC_REPOSITORY_PRIVACY.md`](PUBLIC_REPOSITORY_PRIVACY.md)
+文档发现错误或过时时直接修正；历史方案不自动成为新任务的要求。

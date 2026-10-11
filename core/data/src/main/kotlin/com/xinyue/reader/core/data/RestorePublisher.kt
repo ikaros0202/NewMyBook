@@ -9,6 +9,8 @@ import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 
 enum class RestoreFaultPoint {
     AFTER_PLAN_CONFIRMED,
@@ -137,12 +139,11 @@ class RestorePublisher(
             cleanup(snapshot, prepared, activeJournal)
             return resolved.success()
         } catch (_: CancellationException) {
-            if (journal?.phase?.ordinal ?: -1 >= RestorePhase.VERIFIED.ordinal) return requireNotNull(resolved).success()
-            rollback(snapshot, prepared, journal)
-            return RestoreResult.Cancelled
+            if (journal?.phase in COMMITTED_PHASES) return requireNotNull(resolved).success()
+            return if (rollback(snapshot, prepared, journal)) RestoreResult.Cancelled else recoveryRequired()
         } catch (error: Exception) {
-            if (journal?.phase?.ordinal ?: -1 >= RestorePhase.VERIFIED.ordinal) return requireNotNull(resolved).success()
-            rollback(snapshot, prepared, journal)
+            if (journal?.phase in COMMITTED_PHASES) return requireNotNull(resolved).success()
+            if (!rollback(snapshot, prepared, journal)) return recoveryRequired()
             val code = if (error.message?.contains("空间") == true) BackupErrorCode.SPACE else BackupErrorCode.UNKNOWN
             return RestoreResult.Failure(BackupError(code, "恢复失败，现有数据已保持或回滚"))
         }
@@ -161,15 +162,37 @@ class RestorePublisher(
         }
     }
 
-    private suspend fun rollback(snapshot: RestoreSnapshot?, prepared: PreparedRestorePlan, journal: RestoreJournal?) {
-        if (snapshot != null) {
-            runCatching { database.replaceAll(snapshot.catalog) }
-            runCatching { snapshotStore.rollbackFiles(snapshot) }
-            runCatching { snapshotStore.cleanup(snapshot) }
+    private suspend fun rollback(
+        snapshot: RestoreSnapshot?,
+        prepared: PreparedRestorePlan,
+        journal: RestoreJournal?,
+    ): Boolean = withContext(NonCancellable) {
+        try {
+            // Persist the rollback intent before compensation, including after a committed transaction.
+            journal?.let { journalStore.write(it.copy(phase = RestorePhase.ROLLBACK_PENDING)) }
+            if (snapshot != null) {
+                if (database.snapshot().canonicalForRestore() != snapshot.catalog.canonicalForRestore()) {
+                    database.replaceAll(snapshot.catalog)
+                }
+                require(database.snapshot().canonicalForRestore() == snapshot.catalog.canonicalForRestore())
+                snapshotStore.rollbackFiles(snapshot)
+            }
+        } catch (_: Exception) {
+            return@withContext false
         }
-        runCatching { prepared.staged.cleanup() }
-        journal?.let { runCatching { journalStore.delete(it.operationId) } }
+        // A separate durable state lets startup finish cleanup even if the snapshot was already removed.
+        runCatching {
+            journal?.let { journalStore.write(it.copy(phase = RestorePhase.ROLLED_BACK)) }
+            if (snapshot != null) require(snapshotStore.cleanup(snapshot))
+            require(prepared.staged.cleanup())
+            journal?.let { require(journalStore.delete(it.operationId)) }
+        }
+        true
     }
+
+    private fun recoveryRequired() = RestoreResult.Failure(
+        BackupError(BackupErrorCode.UNKNOWN, "恢复未完成，回滚资料已保留。请重新打开应用以重试恢复现有数据"),
+    )
 
     private fun cleanup(snapshot: RestoreSnapshot, prepared: PreparedRestorePlan, journal: RestoreJournal) {
         require(snapshotStore.cleanup(snapshot)) { "恢复快照清理失败" }
@@ -201,6 +224,10 @@ class RestorePublisher(
     }
 
     private fun ResolvedRestore.success() = RestoreResult.Success(restoredCount, skippedCount, conflictCopyCount, metadataOnlyBookCount)
+
+    private companion object {
+        val COMMITTED_PHASES = setOf(RestorePhase.VERIFIED, RestorePhase.CLEANUP_PENDING, RestorePhase.COMPLETED)
+    }
 }
 
 object BackupCatalogDigest {

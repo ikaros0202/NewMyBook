@@ -10,6 +10,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.Density
@@ -39,7 +40,15 @@ class ReaderV12AccessibilityTest {
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.PaneTitle, "文本选择操作"))
         listOf("书签", "批注").forEach { label ->
             val action = compose.onNode(hasText(label) and hasClickAction())
-            action.performScrollTo().assertIsDisplayed()
+            action.assertIsDisplayed()
+            val bounds = action.fetchSemanticsNode().boundsInRoot
+            val minimum = 48f * compose.density.density
+            assertTrue("$label width ${bounds.width}px is below 48dp ($minimum px)", bounds.width >= minimum)
+            assertTrue("$label height ${bounds.height}px is below 48dp ($minimum px)", bounds.height >= minimum)
+        }
+        listOf("黄色高亮", "绿色高亮", "蓝色高亮", "粉色高亮").forEach { label ->
+            val action = compose.onNodeWithContentDescription(label)
+            action.assertIsDisplayed()
             val bounds = action.fetchSemanticsNode().boundsInRoot
             val minimum = 48f * compose.density.density
             assertTrue("$label width ${bounds.width}px is below 48dp ($minimum px)", bounds.width >= minimum)

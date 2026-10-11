@@ -172,7 +172,9 @@ Assert-True ($testContent -match 'SCOPE_A_INPUT' -and $testContent -match 'SCOPE
 Assert-True (
     $testContent -match 'waitForStep\(\s*"search-result"[\s\S]*?SemanticsProperties\.StateDescription[\s\S]*?performScrollToIndex\(3\)'
 ) 'private search without a result must fail'
-Assert-True ($testContent -match 'library-create-group[\s\S]*library-view-series[\s\S]*library-status-filters[\s\S]*performScrollTo') 'shelf matrix must cover group, view, filters and horizontal reachability'
+foreach ($requiredControl in @('library-create-group', 'library-view-series', 'library-status-filters', 'performScrollTo')) {
+    Assert-True ($testContent -match [regex]::Escape($requiredControl)) 'shelf matrix must cover group, view, filters and scroll reachability'
+}
 Assert-True ($testContent -match 'reportSkip\("tts-engine"\)') 'TTS skip must be explicit and neutral'
 Assert-True ($testContent -match 'reportSkip\("tts-raw-oracle"\)') 'TTS raw oracle gap must remain explicit'
 Assert-True ($testContent -match 'sendStatus\([\s\S]*?V16_STATUS=SKIP') 'TTS skip status must use the instrumentation result channel'

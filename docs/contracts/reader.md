@@ -22,9 +22,12 @@
 | 私有字体导入与删除 | [`ImportedFontRepository`](../../core/domain/src/main/kotlin/com/xinyue/reader/core/domain/repository/ImportedFontRepository.kt) | [`LocalImportedFontRepository`](../../core/data/src/main/kotlin/com/xinyue/reader/core/data/LocalImportedFontRepository.kt) | [`LocalImportedFontRepositoryTest`](../../core/data/src/test/kotlin/com/xinyue/reader/core/data/LocalImportedFontRepositoryTest.kt) |
 | 有界正文窗口 | [`TextSource`](../../core/data/src/main/kotlin/com/xinyue/reader/core/data/BookTextSource.kt) | [`LocalTextSource`](../../core/data/src/main/kotlin/com/xinyue/reader/core/data/LocalBookTextSource.kt) | [`LocalBookTextSourceTest`](../../core/data/src/test/kotlin/com/xinyue/reader/core/data/LocalBookTextSourceTest.kt) |
 | 章节索引快照与替换 | [`ChapterIndexStore`](../../core/data/src/main/kotlin/com/xinyue/reader/core/data/ChapterIndexStore.kt) | 同文件中的 `RoomChapterIndexStore` | [`ReaderViewModelTest`](../../feature/reader/src/test/kotlin/com/xinyue/reader/feature/reader/ReaderViewModelTest.kt) |
+| 全书页码索引 | `ReaderSession.prepareBookPageIndex / cancelBookPageIndex / jumpToBookPage` | [`ReaderBookPageIndex.kt`](../../feature/reader/src/main/kotlin/com/xinyue/reader/feature/reader/ReaderBookPageIndex.kt)、[`ReaderViewModel`](../../feature/reader/src/main/kotlin/com/xinyue/reader/feature/reader/ReaderViewModel.kt) | [`ReaderBookPageIndexTest`](../../feature/reader/src/test/kotlin/com/xinyue/reader/feature/reader/ReaderBookPageIndexTest.kt)；功能接线待设备验收 |
 | TXT 阅读排版空白 | [`ReaderLayoutWhitespaceNormalizer`](../../core/text/src/main/kotlin/com/xinyue/reader/core/text/ReaderLayoutWhitespaceNormalizer.kt) | 同文件纯文本实现 | [`ReaderLayoutWhitespaceNormalizerTest`](../../core/text/src/test/kotlin/com/xinyue/reader/core/text/ReaderLayoutWhitespaceNormalizerTest.kt)、[`AndroidTextPaginatorTest`](../../feature/reader/src/test/kotlin/com/xinyue/reader/feature/reader/AndroidTextPaginatorTest.kt) |
 | 标题语义、测量与原文选择 | [`ReaderChapterTitleRange`](../../feature/reader/src/main/kotlin/com/xinyue/reader/feature/reader/ReaderChapterTypography.kt) | [`ReaderStyledTextFactory`](../../feature/reader/src/main/kotlin/com/xinyue/reader/feature/reader/ReaderStyledTextFactory.kt)、[`AndroidTextPaginator`](../../feature/reader/src/main/kotlin/com/xinyue/reader/feature/reader/AndroidTextPaginator.kt)、[`ReaderPageSurface`](../../feature/reader/src/main/kotlin/com/xinyue/reader/feature/reader/ReaderPageSurface.kt) | [`ReaderStyledTextFactoryTest`](../../feature/reader/src/test/kotlin/com/xinyue/reader/feature/reader/ReaderStyledTextFactoryTest.kt)、[`ReaderSelectableTextViewTest`](../../feature/reader/src/test/kotlin/com/xinyue/reader/feature/reader/ReaderSelectableTextViewTest.kt) |
+| 阅读会话跳转与续读 | `ReaderSession.jumpToChapter / jumpToBookPage / jumpTemporarily / continueFromHere` | [`ReaderViewModel`](../../feature/reader/src/main/kotlin/com/xinyue/reader/feature/reader/ReaderViewModel.kt)、[`ReaderNavigationController`](../../feature/reader/src/main/kotlin/com/xinyue/reader/feature/reader/ReaderNavigationController.kt) | [`ReaderNavigationControllerTest`](../../feature/reader/src/test/kotlin/com/xinyue/reader/feature/reader/ReaderNavigationControllerTest.kt)、[`ReaderViewModelTest`](../../feature/reader/src/test/kotlin/com/xinyue/reader/feature/reader/ReaderViewModelTest.kt) |
 | 阅读器快速/完整外观设置 | `ReaderActions.beginAppearanceEdit / commitAppearanceEdit / cancelAppearanceEdit` | [`ReaderQuickSettings`](../../feature/reader/src/main/kotlin/com/xinyue/reader/feature/reader/ReaderQuickSettings.kt)、[`ReaderSettingsSheet`](../../feature/reader/src/main/kotlin/com/xinyue/reader/feature/reader/ReaderSettingsSheet.kt)、[`ReaderViewModel`](../../feature/reader/src/main/kotlin/com/xinyue/reader/feature/reader/ReaderViewModel.kt) | [`ReaderQuickSettingsTest`](../../feature/reader/src/androidTest/kotlin/com/xinyue/reader/feature/reader/ReaderQuickSettingsTest.kt)、[`ReaderViewModelTest`](../../feature/reader/src/test/kotlin/com/xinyue/reader/feature/reader/ReaderViewModelTest.kt) |
+| 自动翻页与定时停止 | `ReaderAutoPageController / ReaderStopTimerController` | [`ReaderAutomationControllers.kt`](../../feature/reader/src/main/kotlin/com/xinyue/reader/feature/reader/ReaderAutomationControllers.kt)、[`ReaderScreen`](../../feature/reader/src/main/kotlin/com/xinyue/reader/feature/reader/ReaderScreen.kt) | [`ReaderAutomationControllersTest`](../../feature/reader/src/test/kotlin/com/xinyue/reader/feature/reader/ReaderAutomationControllersTest.kt)；功能接线待设备验收 |
 
 阅读状态总协调位于 [`ReaderViewModel.kt`](../../feature/reader/src/main/kotlin/com/xinyue/reader/feature/reader/ReaderViewModel.kt)；分页布局位于 [`AndroidTextPaginator.kt`](../../feature/reader/src/main/kotlin/com/xinyue/reader/feature/reader/AndroidTextPaginator.kt)；进度写入合并位于 [`ProgressWriteCoordinator.kt`](../../feature/reader/src/main/kotlin/com/xinyue/reader/feature/reader/ProgressWriteCoordinator.kt)。
 
@@ -43,15 +46,21 @@
 - JSON 使用版本化顶层 `schemaVersion`；Markdown 和 JSON 的摘录/上下文都必须通过有界正文窗口取得，不能一次加载整本正文。
 - 正文、进度、章节、搜索结果和标注统一使用规范化正文的 UTF-16 偏移。
 - 阅读状态同时保留原文窗口和等长排版副本：排版副本只能把布局空白替换为 `U+2060`，必须保持 UTF-16 长度、所有非空白字符和绝对偏移不变。分页与显示读取排版副本；选择/复制、搜索、朗读、标注、书签和持久进度必须按同一范围读取原文。
+- 分页与显示共用 [`ReaderTextLayoutPolicy`](../../feature/reader/src/main/kotlin/com/xinyue/reader/feature/reader/ReaderTextLayoutPolicy.kt)；排版副本长度与正文不一致时，页面显示回退到原文。分页发布末端前须按实际渲染片段复测并裁掉超出视口的末行。
 - 章节标题范围从真实章节起点延伸到其物理行末；合成的“正文”回退章节不得获得标题样式。标题与正文必须由同一份 styled text 同时用于测量和渲染：标题为正文 `1.45 ×`、粗体、零首行缩进，并以标题后距替代普通段距。
 - 章节起点是硬分页边界。页区间必须连续、不重叠且覆盖已加载窗口一次；标题页隐藏重复的小号运行标题，续页才显示运行标题。
 - 新安装的首行缩进默认值为 `0em`，已持久化的显式设置不迁移或重写；行高下限为 `1.2`，默认仍为 `1.6`。
-- 快速设置按“作用域、字号、行距、段距、缩进、翻页、字体、主题/亮度、更多设置”排序；完整设置保留低频能力。两级页面共享同一个外观草稿、原始稳定锚点和保存/取消事务，切换页面不得提前写库。
+- 快速设置集中作用域、字号、五种主题、全局亮度和“更多设置”；行距、段距、缩进、翻页、字体等低频能力保留在完整设置中。两级页面共享同一个外观草稿、原始稳定锚点和保存/取消事务，切换页面不得提前写库；当前书作用域隐藏全局亮度并说明原因。
+- 阅读工具按顶部导航/更多操作和底部高频操作分组；阅读位置通过目录选章或页码跳转处理，不再使用阅读进度滑杆。全书页码只在用户显式打开页码入口时按当前版式异步生成；索引未完成时明确标注本章页码（窗口不完整时标注约值），完成后才显示全书页码。取消、失败或离开不改变正文和稳定进度，成功的正式跳页提交稳定进度并保留“返回跳转前”的正式原点。
+- 全书页码索引使用有界正文窗口、同一排版空白归一化、标题测量和章节硬边界，输出绝对 UTF-16 页边界；字体、版式或章节变化会使索引失效并重新生成。章节 generation 变化时，未完成的正文窗口跳转也必须取消并清理加载状态；过期请求不得覆盖原正文窗口、当前页或稳定进度，也不得把取消报告为正文读取失败。数据库 schema 和备份格式不变。
 - `CURRENT_BOOK` 只写稀疏单书覆盖，不能写全局主题手动覆盖；`GLOBAL` 写全局设置并按既有单书覆盖重新解析。异步保存只允许关闭启动它的同一草稿；失败保留当前草稿和待重试主题选择，旧保存结果不得覆盖更新的编辑会话。
 - resolved 单书外观由全局设置加稀疏覆盖派生，不能反向保存为第二份完整设置。
 - 主题计划与手动覆盖共享协调写入，不能覆盖同一设置行中的无关字段。
 - 字体文件只由数据层验证、引用计数和删除；缺失字体必须安全回退，不能阻断阅读。
-- 临时跳转不覆盖稳定进度，离开阅读器前刷新待写入进度。
+- 自动翻页只允许 10/15/20/30/60 秒间隔，默认 20 秒；每次翻页必须等待上一页完成，不并发、不追赶错过的间隔。正文触摸按下、手势、打开菜单、进入后台、离开阅读页、到达书末或翻页失败时暂停。
+- 朗读与自动翻页互斥，开始一方会停止另一方。朗读失败结束活动状态并给出原因，停止或替换任务后的系统旧回调不影响新任务。
+- 定时停止只允许 15/30/60 分钟，使用单调时间计时；进入后台后仍继续计时，到期停止 TTS 和自动翻页、临时解除本次阅读的保持亮屏并提示当前进度不变。定时不写入持久设置；离开阅读页会取消定时，恢复计时必须重新开启。
+- 成功的目录选择通过 `jumpToChapter` 提交新的稳定续读位置，同时保留菜单“返回跳转前”的正式阅读原点（从临时浏览再目录换章也取原正式位置）；搜索结果和书签通过临时跳转浏览，只有“从这里继续”才提交新的稳定位置。离开阅读器前刷新待写入进度。
 - 全局设置子页只预览本页草稿；保存通过 `ReaderSettingsRepository.updateGlobalFromLatest` 在同一次协调写入内读取最新全局设置并只合并当前分区字段，调用方不得在仓库外重复取得同一写锁。取消或放弃不得写库。
 - 主题增删改、主题计划、字体导入/删除和备份恢复属于独立即时管理动作，不进入普通设置草稿；字体被引用时删除必须失败且保留文件。
 

@@ -1,6 +1,5 @@
 package com.xinyue.reader.benchmark
 
-import android.graphics.Rect
 import androidx.benchmark.macro.MacrobenchmarkScope
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
@@ -24,18 +23,20 @@ class XinYueJourneys(private val scope: MacrobenchmarkScope) {
         }
         var backPresses = 0
         while (!isLibraryVisible() && backPresses < 4) {
+            device.findObject(By.desc("书架"))?.let { it.click(); device.waitForIdle() }
+            if (isLibraryVisible()) break
             device.pressBack()
             device.waitForIdle()
             backPresses += 1
         }
-        require(device.wait(Until.hasObject(By.text("导入")), 5_000) || isLibraryVisible()) {
+        require(isLibraryVisible()) {
             "XinYue did not return to the library"
         }
     }
 
     fun ensurePublicFixtureImported() {
         if (device.hasObject(By.text(FIXTURE_NAME))) return
-        clickText("导入")
+        clickLibraryImport(device)
         clickText("选择 TXT 文件")
 
         val fixtureResult = By.text(FIXTURE_FILE_NAME).clazz("android.widget.TextView")
@@ -66,9 +67,7 @@ class XinYueJourneys(private val scope: MacrobenchmarkScope) {
 
     fun openFixture() {
         clickText(FIXTURE_NAME)
-        require(device.wait(Until.hasObject(By.textContains("全书")), UI_TIMEOUT_MILLIS)) {
-            "Public fixture did not open in the reader"
-        }
+        waitForReaderBody(device, UI_TIMEOUT_MILLIS)
     }
 
     fun turnPages(count: Int) {
@@ -91,10 +90,10 @@ class XinYueJourneys(private val scope: MacrobenchmarkScope) {
         val field = device.wait(Until.findObject(By.clazz("android.widget.EditText")), 5_000)
             ?: error("Reader search field is missing")
         field.text = query
-        val searchButton = device.findObjects(By.text("搜索")).firstOrNull(UiObject2::isClickable)
+        val searchButton = device.wait(Until.findObject(By.text("搜索")), 5_000)
             ?: error("Reader search submit action is missing")
         searchButton.click()
-        require(device.wait(Until.hasObject(By.textContains(query)), UI_TIMEOUT_MILLIS)) {
+        require(device.wait(Until.hasObject(By.textContains(query).clazz("android.widget.TextView")), UI_TIMEOUT_MILLIS)) {
             "Reader search did not expose a result for the public query"
         }
     }
@@ -121,19 +120,14 @@ class XinYueJourneys(private val scope: MacrobenchmarkScope) {
 
     fun openSettingsAndApplyReflow() {
         openReaderControls()
-        clickText("设置")
-        val fontLabel = device.wait(Until.findObject(By.textStartsWith("字号 ")), 5_000)
-            ?: error("Reader font-size setting is missing")
-        val labelBounds: Rect = fontLabel.visibleBounds
-        val sliderY = labelBounds.bottom + 56
-        device.swipe(
-            device.displayWidth * 2 / 5,
-            sliderY,
-            device.displayWidth * 3 / 5,
-            sliderY,
-            12,
-        )
-        clickText("应用")
+        clickText("外观")
+        val increase = device.wait(Until.findObject(By.desc("增大字号")), 5_000)
+            ?: error("Reader font-size action is missing")
+        if (increase.isEnabled) increase.click() else {
+            requireNotNull(device.findObject(By.desc("减小字号"))).click()
+        }
+        clickText("完成")
+        require(device.wait(Until.gone(By.desc("增大字号")), 5_000)) { "Appearance draft was not saved" }
         device.waitForIdle()
     }
 
@@ -144,13 +138,13 @@ class XinYueJourneys(private val scope: MacrobenchmarkScope) {
         } else {
             device.click(device.displayWidth / 2, device.displayHeight / 2)
         }
-        require(device.wait(Until.hasObject(By.text("设置")), 5_000)) {
+        require(device.wait(Until.hasObject(By.text("外观")), 5_000)) {
             "Reader controls did not open"
         }
     }
 
     private fun isLibraryVisible(): Boolean =
-        device.hasObject(By.text("导入")) || device.hasObject(By.text(FIXTURE_NAME))
+        device.hasObject(By.desc("书架").selected(true)) || device.hasObject(By.desc("导入 TXT"))
 
     private fun clickText(text: String) {
         val target = device.wait(Until.findObject(By.text(text)), UI_TIMEOUT_MILLIS)
@@ -158,4 +152,29 @@ class XinYueJourneys(private val scope: MacrobenchmarkScope) {
         target.click()
         device.waitForIdle()
     }
+}
+
+internal fun clickLibraryImport(device: UiDevice) {
+    val action = device.findObject(By.desc("导入 TXT"))
+        ?: device.wait(Until.findObject(By.text("选择 TXT 文件")), UI_TIMEOUT_MILLIS)
+        ?: error("Library TXT import action is missing")
+    action.click()
+    device.waitForIdle()
+}
+
+internal fun waitForReaderBody(device: UiDevice, timeoutMillis: Long): UiObject2 {
+    val deadline = android.os.SystemClock.uptimeMillis() + timeoutMillis
+    while (android.os.SystemClock.uptimeMillis() < deadline) {
+        val body = device.findObjects(By.clazz("android.widget.TextView"))
+            .mapNotNull { node ->
+                runCatching {
+                    node.takeIf { it.visibleBounds.width() > device.displayWidth / 2 && it.text.orEmpty().length >= 40 }
+                        ?.let { it to it.text.orEmpty().length }
+                }.getOrNull()
+            }
+            .maxByOrNull { it.second }?.first
+        if (body != null) return body
+        android.os.SystemClock.sleep(200)
+    }
+    error("Reader body TextView did not become visible")
 }

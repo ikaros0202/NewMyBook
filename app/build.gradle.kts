@@ -12,8 +12,8 @@ android {
 
     defaultConfig {
         applicationId = "com.xinyue.reader"
-        versionCode = 8
-        versionName = "1.0.0"
+        versionCode = 10
+        versionName = "1.0.2"
         testProguardFiles("test-proguard-rules.pro")
     }
 

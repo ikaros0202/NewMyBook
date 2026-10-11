@@ -360,6 +360,19 @@ class XinYueDatabaseTest {
         assertThat(dao.searchTrigram(book.id, "\"新一代\"", 20)).isEmpty()
         assertThat(dao.searchTrigram(book.id, "\"秘密内容\"", 20)).isEmpty()
 
+        dao.insertChunks(listOf(SearchChunkEntity(
+            bookId = book.id, generationId = "gen-1", chapterStartOffset = 0,
+            startOffset = 200, content = "星河璀璨，故人又重逢。",
+        )))
+        val firstTrigram = dao.searchTrigram(book.id, "\"星河璀\"", 1).single()
+        val nextTrigram = dao.searchTrigram(book.id, "\"星河璀\"", 1, firstTrigram.rowId).single()
+        assertThat(firstTrigram.startOffset).isEqualTo(0L)
+        assertThat(nextTrigram.startOffset).isEqualTo(200L)
+        assertThat(dao.searchTrigram(book.id, "\"星河璀\"", 1, nextTrigram.rowId)).isEmpty()
+        val firstShort = dao.searchShort(book.id, "%故人%", 1).single()
+        assertThat(dao.searchShort(book.id, "%故人%", 1, firstShort.rowId).single().startOffset)
+            .isEqualTo(200L)
+
         database.bookDao().deleteAndQueueFileCleanup(book.id, queuedAtEpochMillis = 99)
         assertThat(dao.getState(book.id)).isNull()
         assertThat(dao.searchTrigram(book.id, "\"星河璀璨\"", 20)).isEmpty()

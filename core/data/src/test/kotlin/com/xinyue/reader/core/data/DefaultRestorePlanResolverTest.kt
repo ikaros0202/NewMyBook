@@ -23,6 +23,63 @@ class DefaultRestorePlanResolverTest {
     @get:Rule val temporary = TemporaryFolder()
 
     @Test
+    fun `omitted fonts fall back across global book and theme settings including older archives`() {
+        val backup = BackupCatalogSnapshot(
+            books = listOf(book("book", "public")),
+            globalSettings = BackupGlobalSettingsRecord(settings("omitted-font"), schedule(), 1),
+            themes = listOf(BackupThemeRecord("theme", "公开主题", settings("omitted-font"), false, 1)),
+            bookSettings = listOf(BackupBookSettingsRecord(
+                "book", readerDataJson.encodeToString(ReaderSettingsOverrides(font = ReaderFontRef.Imported("omitted-font"), fontSizeSp = 28f)), 1,
+            )),
+        )
+        val options = BackupOptions(includeBookText = true, includeFonts = false)
+        // No bookSources: the inventory here exercises only its catalog transformation.
+        val exported = BackupAssetInventory(temporary.newFolder()).collect(backup, options).catalog
+        for (catalog in listOf(backup, exported)) {
+            for (mode in RestoreMode.entries) {
+                val prepared = prepared(catalog, BackupCatalogSnapshot(), options)
+                val desired = DefaultRestorePlanResolver().resolve(prepared, RestoreRequest("token", mode, emptyList())).desiredCatalog
+                assertThat(readerDataJson.decodeFromString<ReaderSettings>(desired.globalSettings!!.settingsJson).font).isEqualTo(ReaderFontRef.System)
+                assertThat(readerDataJson.decodeFromString<ReaderSettings>(desired.themes.single().settingsJson).font).isEqualTo(ReaderFontRef.System)
+                val overrides = readerDataJson.decodeFromString<ReaderSettingsOverrides>(desired.bookSettings.single().overridesJson)
+                assertThat(overrides.font).isEqualTo(ReaderFontRef.System)
+                assertThat(overrides.fontSizeSp).isEqualTo(28f)
+            }
+        }
+    }
+
+    @Test
+    fun `included font references remain strict when the font is missing`() {
+        val backup = BackupCatalogSnapshot(globalSettings = BackupGlobalSettingsRecord(settings("missing"), schedule(), 1))
+        val prepared = prepared(backup, BackupCatalogSnapshot(), BackupOptions(includeFonts = true))
+        assertThat(runCatching {
+            DefaultRestorePlanResolver().resolve(prepared, RestoreRequest("token", RestoreMode.OVERWRITE, emptyList()))
+        }.exceptionOrNull()).isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun `keeping renamed local groups and themes maps dependents to existing identities`() {
+        val current = BackupCatalogSnapshot(
+            books = listOf(book("book", "public", groupId = "group")),
+            groups = listOf(BackupGroupRecord("group", "本地改名", 0, 1, 2)),
+            themes = listOf(BackupThemeRecord("theme", "本地主题改名", settings(), false, 2)),
+        )
+        val backup = current.copy(
+            groups = listOf(BackupGroupRecord("group", "原分组", 0, 1, 1)),
+            themes = listOf(BackupThemeRecord("theme", "原主题", settings(), false, 1)),
+            globalSettings = BackupGlobalSettingsRecord(settings(), schedule("theme"), 2),
+        )
+        val prepared = prepared(backup, current, BackupOptions(true, false))
+        val resolutions = prepared.plan.conflicts.map { RestoreConflictResolution(it.id, RestoreConflictChoice.KEEP_LOCAL) }
+        val desired = DefaultRestorePlanResolver().resolve(prepared, RestoreRequest("token", RestoreMode.MERGE, resolutions)).desiredCatalog
+
+        assertThat(desired.groups).containsExactlyElementsIn(current.groups)
+        assertThat(desired.themes).containsExactlyElementsIn(current.themes)
+        assertThat(desired.memberships.map { it.groupId }).containsExactly("group")
+        assertThat(readerDataJson.decodeFromString<StoredReaderThemeSchedule>(desired.globalSettings!!.scheduleJson).schedule.lightThemeId).isEqualTo("theme")
+    }
+
+    @Test
     fun `merge applies explicit conflict choices and remaps dependent settings`() {
         val current = BackupCatalogSnapshot(
             books = listOf(book("local-book", "local-hash", groupId = "local-group")),

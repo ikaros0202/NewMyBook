@@ -64,6 +64,13 @@ class LibraryV12AccessibilityTest {
             assertTrue("$label width ${bounds.width}px is below 48dp ($minimum px)", bounds.width >= minimum)
             assertTrue("$label height ${bounds.height}px is below 48dp ($minimum px)", bounds.height >= minimum)
         }
+
+        compose.onNodeWithText("集合").performScrollTo().performClick()
+        compose.onNodeWithText("移动到").assertIsDisplayed().performClick()
+        compose.onNodeWithText("未加入集合").assertIsDisplayed().performClick()
+        compose.onNodeWithText("状态").performScrollTo().performClick()
+        compose.onNodeWithText("标记已读完").assertIsDisplayed()
+        compose.onNodeWithText("取消已读完").assertIsDisplayed().performClick()
     }
 
     @Test

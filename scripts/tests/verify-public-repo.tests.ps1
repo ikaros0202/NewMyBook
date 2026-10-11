@@ -74,10 +74,38 @@ try {
     if ((Invoke-Audit $denylistFilenameRoot $denylist) -eq 0) {
         throw "A filename containing an external private denylist literal must fail"
     }
+    foreach ($extension in @('.py', '.pyw', '.pyi')) {
+        $pythonRoot = Join-Path $testRoot ('python-' + $extension.Substring(1))
+        New-Item -ItemType Directory -Path $pythonRoot | Out-Null
+        $pythonFile = Join-Path $pythonRoot ('helper' + $extension)
+        foreach ($unsafeText in @($concreteHomePath, ('ghp_' + ('B' * 36)), 'PRIVATE_FIXTURE_MARKER')) {
+            Set-Content -Encoding UTF8 -LiteralPath $pythonFile -Value $unsafeText
+            if ((Invoke-Audit $pythonRoot $denylist) -eq 0) { throw "Python source privacy leak was missed: $extension" }
+        }
+        Set-Content -Encoding UTF8 -LiteralPath $pythonFile -Value 'print("public fixture")'
+        if ((Invoke-Audit $pythonRoot $denylist) -ne 0) { throw "Clean Python source must pass: $extension" }
+    }
+    $localRoot = Join-Path $testRoot 'ignored-local-denylist'
+    New-Item -ItemType Directory -Path (Join-Path $localRoot 'private-local/qa') -Force | Out-Null
+    & git -C $localRoot init -q
+    if ($LASTEXITCODE -ne 0) { throw 'Could not initialize privacy fixture repository' }
+    Set-Content -LiteralPath (Join-Path $localRoot '.gitignore') -Value 'private-local/'
+    Set-Content -LiteralPath (Join-Path $localRoot 'README.md') -Value 'Public fixture'
+    $localDenylist = Join-Path $localRoot 'private-local/qa/denylist.txt'
+    Set-Content -LiteralPath $localDenylist -Value 'PRIVATE_LOCAL_MARKER'
+    if ((Invoke-Audit $localRoot $localDenylist) -ne 0) {
+        throw 'An ignored project-local QA denylist must be supported'
+    }
+    Set-Content -LiteralPath (Join-Path $localRoot 'README.md') -Value 'PRIVATE_LOCAL_MARKER'
+    if ((Invoke-Audit $localRoot $localDenylist) -eq 0) {
+        throw 'An ignored project-local QA denylist must still detect private content'
+    }
+    # Git initializes hidden metadata; clear that attribute for ordinary cleanup.
+    (Get-Item -LiteralPath (Join-Path $localRoot '.git') -Force).Attributes = [IO.FileAttributes]::Directory
 } finally {
     if ($testRoot.StartsWith($systemTempRoot, [System.StringComparison]::OrdinalIgnoreCase) -and
         (Test-Path -LiteralPath $testRoot)) {
-        Remove-Item -LiteralPath $testRoot -Recurse -Force
+        Remove-Item -LiteralPath $testRoot -Recurse
     }
 }
 

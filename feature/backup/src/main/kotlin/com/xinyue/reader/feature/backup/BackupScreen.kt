@@ -6,18 +6,30 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -28,11 +40,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -43,6 +59,9 @@ import com.xinyue.reader.core.data.BackupWorkType
 import com.xinyue.reader.core.domain.model.AnnotationExportFormat
 import com.xinyue.reader.core.domain.model.AnnotationExportRequest
 import com.xinyue.reader.core.domain.model.HandoffExportRequest
+import com.xinyue.reader.core.ui.XinYueIcons
+import com.xinyue.reader.core.ui.AnnotationExportRequestSaver
+import com.xinyue.reader.core.ui.HandoffExportRequestSaver
 import kotlinx.coroutines.flow.collectLatest
 
 @Composable
@@ -62,7 +81,7 @@ fun BackupRoute(
     val openHandoffDocument = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         viewModel.onHandoffDocumentChosen(uri?.toString())
     }
-    var pendingHandoffRequest by remember { mutableStateOf<HandoffExportRequest?>(null) }
+    var pendingHandoffRequest by rememberSaveable(stateSaver = HandoffExportRequestSaver) { mutableStateOf<HandoffExportRequest?>(null) }
     val createHandoffDocument = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/zip"),
     ) { uri ->
@@ -70,7 +89,7 @@ fun BackupRoute(
         pendingHandoffRequest = null
         if (request != null) viewModel.onHandoffExportDocumentChosen(uri?.toString(), request)
     }
-    var pendingAnnotationRequest by remember { mutableStateOf<AnnotationExportRequest?>(null) }
+    var pendingAnnotationRequest by rememberSaveable(stateSaver = AnnotationExportRequestSaver) { mutableStateOf<AnnotationExportRequest?>(null) }
     val createMarkdown = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("text/markdown"),
     ) { uri ->
@@ -139,8 +158,8 @@ fun BackupRoute(
         AlertDialog(
             onDismissRequest = viewModel::dismissOverwriteConfirmation,
             title = { Text("确认覆盖整个本机书架？") },
-            text = { Text("应用会先创建内部安全快照，再替换书籍、文件、设置、进度、标注和统计。任何发布或校验失败都会回滚；恢复完成后快照会清理。") },
-            confirmButton = { Button(onClick = viewModel::confirmOverwriteRestore) { Text("创建快照并覆盖") } },
+            text = { Text("当前书架、进度、笔记和设置将被备份替换。应用会临时保存当前数据；恢复失败时自动还原。") },
+            confirmButton = { Button(shape = MaterialTheme.shapes.medium, onClick = viewModel::confirmOverwriteRestore) { Text("确认覆盖") } },
             dismissButton = { TextButton(onClick = viewModel::dismissOverwriteConfirmation) { Text("返回") } },
         )
     }
@@ -194,7 +213,11 @@ fun BackupScreen(
         topBar = {
             TopAppBar(
                 title = { Text("备份与恢复") },
-                navigationIcon = { TextButton(onClick = onBack) { Text("返回") } },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(painterResource(XinYueIcons.ArrowBack), contentDescription = "返回")
+                    }
+                },
             )
         },
         snackbarHost = { SnackbarHost(snackbar) },
@@ -305,24 +328,31 @@ private fun BackupHome(
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(padding).testTag("backup_home_list"),
         contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         item {
-            Text("所有处理都在本机完成", style = MaterialTheme.typography.headlineSmall)
-            Text("备份不会上传；恢复会先检查完整文件并生成预览，不会在确认前修改书架。")
+            Text(
+                "备份保存在你选择的位置，恢复前可先查看内容。",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 20.dp),
+            )
+            Text("整个书架", style = MaterialTheme.typography.titleMedium)
         }
         item {
-            BackupActionCard("导出备份", "选择是否包含正文和字体，再通过系统文件选择器保存。", "开始导出", onRequestExport)
+            BackupActionRow("导出备份", "保存书籍、阅读进度和设置", "开始导出", onRequestExport)
         }
         item {
-            BackupActionCard("从备份恢复", "先验证格式、路径、大小和哈希，再逐项确认冲突。", "选择备份文件", onRequestRestore)
+            BackupActionRow("从备份恢复", "选择备份，预览后再恢复", "选择备份文件", onRequestRestore)
         }
         item {
-            BackupActionCard(
+            Text("笔记与单书", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 24.dp, bottom = 8.dp))
+            BackupActionRow(
                 title = "导出全部批注",
-                body = "生成 Markdown 或版本化 JSON；默认不含书签，不包含小说原文文件。",
+                body = "保存为 Markdown 或 JSON，可选包含书签",
                 action = if (annotationExportInProgress) "正在导出…" else "选择导出格式",
                 onClick = onRequestAnnotationExport,
+                enabled = !annotationExportInProgress,
             )
             annotationExportMessage?.let {
                 Text(
@@ -333,17 +363,17 @@ private fun BackupHome(
             }
         }
         item {
-            BackupActionCard(
-                title = "导出单书阅读接力包",
-                body = "转移一本书的进度、完成状态、标注、单书设置、系列和集合；默认不含正文。",
+            BackupActionRow(
+                title = "导出单书接力包",
+                body = "将一本书的进度、笔记和设置带到另一台设备",
                 action = "选择书籍",
                 onClick = onRequestHandoffExport,
             )
         }
         item {
-            BackupActionCard(
+            BackupActionRow(
                 title = "应用阅读接力包",
-                body = "先完成格式、路径、大小、压缩比和 SHA-256 校验，再预览并确认合并。",
+                body = "接着另一台设备上的位置阅读",
                 action = "选择 .xinyuehandoff",
                 onClick = onRequestHandoffImport,
             )
@@ -358,53 +388,64 @@ internal fun AnnotationExportDialog(
     onDismiss: () -> Unit,
 ) {
     var includeBookmarks by remember { mutableStateOf(false) }
+    var format by remember { mutableStateOf(AnnotationExportFormat.MARKDOWN) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("导出内容可能包含私人摘录和批注，请只保存到可信位置。")
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(AnnotationExportFormat.MARKDOWN to "Markdown", AnnotationExportFormat.JSON to "JSON").forEach { (option, label) ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                            .selectable(selected = format == option, role = Role.RadioButton, onClick = { format = option }),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = format == option, onClick = null)
+                        Column {
+                            Text(label)
+                            Text(
+                                if (option == AnnotationExportFormat.MARKDOWN) "方便直接阅读和整理" else "方便其他工具处理",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
                 androidx.compose.foundation.layout.Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 48.dp)
-                        .clickable { includeBookmarks = !includeBookmarks },
+                        .toggleable(value = includeBookmarks, role = Role.Checkbox, onValueChange = { includeBookmarks = it }),
                 ) {
                     Checkbox(checked = includeBookmarks, onCheckedChange = null)
                     Text("包含书签", modifier = Modifier.padding(top = 12.dp))
                 }
+                Text("内容可能包含私人摘录，请保存到可信位置。", style = MaterialTheme.typography.bodySmall)
             }
         },
         confirmButton = {
-            TextButton(onClick = { onChoose(AnnotationExportFormat.MARKDOWN, includeBookmarks) }) {
-                Text("导出 Markdown")
+            TextButton(onClick = { onChoose(format, includeBookmarks) }) {
+                Text("导出")
             }
         },
         dismissButton = {
-            Column {
-                TextButton(onClick = { onChoose(AnnotationExportFormat.JSON, includeBookmarks) }) {
-                    Text("导出 JSON")
-                }
-                TextButton(onClick = onDismiss) { Text("取消") }
-            }
+            TextButton(onClick = onDismiss) { Text("取消") }
         },
     )
 }
 
 @Composable
-private fun BackupActionCard(title: String, body: String, action: String, onClick: () -> Unit) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(title, style = MaterialTheme.typography.titleLarge)
-            Text(body)
-            Button(
-                onClick = onClick,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 48.dp),
-            ) { Text(action) }
-        }
-    }
+private fun BackupActionRow(title: String, body: String, action: String, onClick: () -> Unit, enabled: Boolean = true) {
+    ListItem(
+        headlineContent = { Text(title) },
+        supportingContent = { Text(if (enabled) body else action) },
+        trailingContent = {
+            Icon(painterResource(XinYueIcons.ChevronRight), contentDescription = null, modifier = Modifier.size(20.dp))
+        },
+        modifier = Modifier.fillMaxWidth().heightIn(min = 80.dp).clickable(enabled = enabled, onClick = onClick),
+        colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
+    )
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 }
 
 @Composable
@@ -456,7 +497,7 @@ private fun ResultContent(padding: PaddingValues, state: BackupUiState, onReset:
         } else {
             Text(state.resultMessage ?: if (work?.status == BackupWorkStatus.CANCELLED) "操作已取消" else "现有数据未受影响，可返回重试。")
         }
-        Button(onClick = onReset) { Text("返回备份与恢复") }
+        Button(shape = MaterialTheme.shapes.medium, onClick = onReset) { Text("返回备份与恢复") }
     }
 }
 

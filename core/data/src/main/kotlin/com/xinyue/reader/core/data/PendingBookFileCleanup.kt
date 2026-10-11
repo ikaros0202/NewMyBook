@@ -24,6 +24,7 @@ class DurablePendingBookFileCleanup @Inject constructor(
                         originalPath = pending.originalPath,
                         normalizedPath = pending.normalizedPath,
                     ),
+                    ownerBookId = pending.bookId,
                 )
                 cleanupDao.delete(pending.bookId)
             } catch (cancelled: CancellationException) {

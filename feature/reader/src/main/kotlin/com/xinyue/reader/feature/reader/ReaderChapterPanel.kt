@@ -1,6 +1,7 @@
 package com.xinyue.reader.feature.reader
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -9,11 +10,17 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -26,9 +33,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.xinyue.reader.core.ui.XinYueIcons
 import com.xinyue.reader.core.text.ChapterRuleSet
 import com.xinyue.reader.core.text.DetectedChapter
 
@@ -51,6 +62,7 @@ internal fun ReaderChapterPanel(
     var renameTarget by remember { mutableStateOf<DetectedChapter?>(null) }
     var renameTitle by remember { mutableStateOf("") }
     var deleteTarget by remember { mutableStateOf<DetectedChapter?>(null) }
+    var actionTarget by remember { mutableStateOf<DetectedChapter?>(null) }
     var confirmReanalysis by remember { mutableStateOf(false) }
     LaunchedEffect(ruleSet) { selectedRule = ruleSet }
 
@@ -79,7 +91,7 @@ internal fun ReaderChapterPanel(
                         if (manuallyEdited) "当前目录含人工修改" else "当前目录由规则生成",
                         style = MaterialTheme.typography.bodySmall,
                     )
-                    Button(
+                    Button(shape = MaterialTheme.shapes.medium,
                         onClick = { confirmReanalysis = true },
                         enabled = !isAnalyzing,
                         modifier = Modifier.defaultMinSize(minHeight = 48.dp),
@@ -94,7 +106,7 @@ internal fun ReaderChapterPanel(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Button(
+                Button(shape = MaterialTheme.shapes.medium,
                     onClick = {
                         onAddAtCurrent(addTitle)
                         if (addTitle.isNotBlank()) addTitle = ""
@@ -104,35 +116,71 @@ internal fun ReaderChapterPanel(
                 ) { Text("在当前页添加章节") }
                 LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
                     items(chapters, key = { it.startOffset }) { chapter ->
-                        Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 64.dp)
+                                .clickable { onSelect(chapter) }
+                                .padding(start = 4.dp, end = 0.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
                             Text(
                                 text = chapter.title,
-                                modifier = Modifier.fillMaxWidth()
-                                    .clickable { onSelect(chapter) }
-                                    .defaultMinSize(minHeight = 48.dp)
-                                    .padding(vertical = 12.dp),
+                                modifier = Modifier.weight(1f).padding(vertical = 12.dp),
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
                             )
-                            FlowRow(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                                TextButton(
-                                    onClick = {
-                                        renameTarget = chapter
-                                        renameTitle = chapter.title
-                                    },
-                                    modifier = Modifier.defaultMinSize(minHeight = 48.dp)
-                                        .semantics { contentDescription = "重命名${chapter.title}" },
-                                ) { Text("重命名") }
-                                TextButton(
-                                    onClick = { onMoveToCurrent(chapter.startOffset) },
-                                    modifier = Modifier.defaultMinSize(minHeight = 48.dp)
-                                        .semantics { contentDescription = "移动${chapter.title}到当前页" },
-                                ) { Text("移到当前页") }
-                                TextButton(
-                                    onClick = { deleteTarget = chapter },
-                                    modifier = Modifier.defaultMinSize(minHeight = 48.dp)
-                                        .semantics { contentDescription = "删除${chapter.title}" },
-                                ) { Text("删除") }
+                            Box {
+                                IconButton(
+                                    onClick = { actionTarget = chapter },
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .testTag("reader-chapter-menu-${chapter.startOffset}"),
+                                ) {
+                                    Icon(
+                                        painter = painterResource(XinYueIcons.MoreVert),
+                                        contentDescription = "章节操作：${chapter.title}",
+                                    )
+                                }
+                                DropdownMenu(
+                                    expanded = actionTarget == chapter,
+                                    onDismissRequest = { actionTarget = null },
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("重命名") },
+                                        onClick = {
+                                            actionTarget = null
+                                            renameTarget = chapter
+                                            renameTitle = chapter.title
+                                        },
+                                        modifier = Modifier.semantics {
+                                            contentDescription = "重命名${chapter.title}"
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("移到当前页") },
+                                        onClick = {
+                                            actionTarget = null
+                                            onMoveToCurrent(chapter.startOffset)
+                                        },
+                                        modifier = Modifier.semantics {
+                                            contentDescription = "移动${chapter.title}到当前页"
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("删除") },
+                                        onClick = {
+                                            actionTarget = null
+                                            deleteTarget = chapter
+                                        },
+                                        modifier = Modifier.semantics {
+                                            contentDescription = "删除${chapter.title}"
+                                        },
+                                    )
+                                }
                             }
                         }
+                        HorizontalDivider()
                     }
                 }
             }

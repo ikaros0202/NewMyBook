@@ -1,6 +1,7 @@
 package com.xinyue.reader.benchmark
 
 import android.graphics.Rect
+import android.graphics.Color
 import android.os.SystemClock
 import android.view.KeyEvent
 import androidx.test.platform.app.InstrumentationRegistry
@@ -12,18 +13,19 @@ import androidx.test.uiautomator.Until
 private const val RELEASE_SELECTION_TIMEOUT = 30_000L
 private const val PUBLIC_FIXTURE_FILE = "sample-novel.txt"
 private const val PUBLIC_FIXTURE_TITLE = "sample-novel"
-private const val PUBLIC_FIXTURE_DEVICE_PATH = "/sdcard/Download/sample-novel.txt"
 
 class ReleaseSelectionJourney {
     private val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+    private val noteText = "release-like note ${SystemClock.uptimeMillis()}"
 
-    fun resetAndLaunch() {
-        val fixtureCheck = device.executeShellCommand("ls $PUBLIC_FIXTURE_DEVICE_PATH").trim()
-        require(fixtureCheck == PUBLIC_FIXTURE_DEVICE_PATH) {
-            "Push qa/sample-novel.txt to Downloads before running ReleaseSelectionTest"
+    fun launchPublicSession() {
+        val user = device.executeShellCommand("am get-current-user").trim().toInt()
+        val users = device.executeShellCommand("pm list users")
+        require(user != 0 && "UserInfo{$user:NewMyBook_Public_QA:" in users) {
+            "Run selection verification in the existing NewMyBook_Public_QA user; existing libraries must not be cleared"
         }
-        device.executeShellCommand("pm clear $PACKAGE_NAME")
-        device.executeShellCommand("monkey -p $PACKAGE_NAME 1")
+        device.executeShellCommand("am force-stop --user $user $PACKAGE_NAME")
+        device.executeShellCommand("am start --user $user -W -n $PACKAGE_NAME/com.xinyue.reader.MainActivity")
         require(device.wait(Until.hasObject(By.pkg(PACKAGE_NAME)), RELEASE_SELECTION_TIMEOUT)) {
             "Release-like XinYue did not reach the foreground"
         }
@@ -36,7 +38,12 @@ class ReleaseSelectionJourney {
     }
 
     fun importAndOpenPublicFixture() {
-        clickText("导入")
+        if (device.wait(Until.hasObject(By.text(PUBLIC_FIXTURE_TITLE)), 2_000)) {
+            clickText(PUBLIC_FIXTURE_TITLE)
+            openFirstChapter()
+            return
+        }
+        clickLibraryImport(device)
         clickText("选择 TXT 文件")
         selectPublicFixtureFromDocumentsUi()
         require(device.wait(Until.hasObject(By.pkg(PACKAGE_NAME)), RELEASE_SELECTION_TIMEOUT)) {
@@ -47,7 +54,7 @@ class ReleaseSelectionJourney {
         }
         device.pressBack()
         clickText(PUBLIC_FIXTURE_TITLE)
-        readerBody()
+        openFirstChapter()
     }
 
     fun assertSelectionSuppressesAndRestoresPaging() {
@@ -75,24 +82,22 @@ class ReleaseSelectionJourney {
     }
 
     fun createAllHighlightColors() {
-        val labels = listOf("黄色高亮", "绿色高亮", "蓝色高亮", "粉色高亮")
-        labels.forEach { label ->
+        val colors = mapOf("黄色高亮" to 0xFFD54F, "绿色高亮" to 0x66BB6A, "蓝色高亮" to 0x64B5F6, "粉色高亮" to 0xF48FB1)
+        colors.forEach { (label, color) ->
             longPressReaderBody()
             findSelectionAction(label).click()
             require(device.wait(Until.gone(By.text(label)), 5_000)) {
                 "Selection action did not finish: $label"
             }
+            assertHighlightVisible(color)
+            // Plain highlights are rendered on the page, not listed as notes.
+            val highlightedPage = readerBody().text.orEmpty()
+            swipeForward()
+            val nextPage = waitForPageChange(highlightedPage)
+            swipeBackward()
+            require(waitForPageChange(nextPage) == highlightedPage) { "Did not return to the highlighted page" }
+            assertHighlightVisible(color)
         }
-
-        openAnnotationsPanel()
-        val highlights = device.wait(
-            Until.findObjects(By.textStartsWith("高亮 · 位置")),
-            10_000,
-        ).orEmpty()
-        require(highlights.size >= labels.size) {
-            "Expected four saved highlights, found ${highlights.size}"
-        }
-        clickText("关闭")
     }
 
     fun createEditAndJumpToNote() {
@@ -102,20 +107,19 @@ class ReleaseSelectionJourney {
         require(device.wait(Until.hasObject(By.text("添加批注")), 5_000)) {
             "Add-note dialog did not open"
         }
-        editField().text = "release-like note"
+        editField().text = noteText
         clickText("保存")
 
         openAnnotationsPanel()
-        require(device.wait(Until.hasObject(By.text("release-like note")), 10_000)) {
-            "Saved note is missing"
-        }
-        clickText("编辑")
-        require(device.wait(Until.hasObject(By.text("编辑批注")), 5_000)) {
+        val savedNote = device.wait(Until.findObject(By.textContains(noteText)), 10_000)
+            ?: error("Saved note is missing")
+        requireNotNull(clickableAncestor(savedNote).findObject(By.text("编辑"))).click()
+        require(device.wait(Until.hasObject(By.text("编辑笔记")), 5_000)) {
             "Edit-note dialog did not open"
         }
-        editField().text = "release-like note edited"
+        editField().text = "$noteText edited"
         clickText("保存")
-        require(device.wait(Until.hasObject(By.text("release-like note edited")), 10_000)) {
+        require(device.wait(Until.hasObject(By.textContains("$noteText edited")), 10_000)) {
             "Edited note is missing"
         }
         clickText("关闭")
@@ -124,11 +128,11 @@ class ReleaseSelectionJourney {
         val awayPage = waitForPageChange(notePage)
         openAnnotationsPanel()
         val noteLocation = device.wait(
-            Until.findObject(By.textStartsWith("批注 · 位置")),
+            Until.findObject(By.textContains("$noteText edited")),
             10_000,
         ) ?: error("Note location action is missing")
         clickableAncestor(noteLocation).click()
-        require(device.wait(Until.gone(By.text("release-like note edited")), 5_000)) {
+        require(device.wait(Until.gone(By.textContains("$noteText edited")), 5_000)) {
             "Annotation panel did not close after the jump action"
         }
         require(waitForAnnotationJump(awayPage, notePage)) {
@@ -186,12 +190,48 @@ class ReleaseSelectionJourney {
     private fun openAnnotationsPanel() {
         val bounds = readerBody().visibleBounds
         device.click(bounds.centerX(), bounds.centerY())
-        val annotations = device.wait(Until.findObject(By.text("标注")), 5_000)
+        val annotations = device.wait(Until.findObject(By.text("笔记")), 5_000)
             ?: error("Reader annotations control is missing")
         annotations.click()
-        require(device.wait(Until.hasObject(By.text("全部")), 5_000) || device.hasObject(By.text("• 全部"))) {
+        require(device.wait(Until.hasObject(By.text("导出批注")), 5_000)) {
             "Reader annotations panel did not open"
         }
+    }
+
+    private fun openFirstChapter() {
+        val bounds = readerBody().visibleBounds
+        device.click(bounds.centerX(), bounds.centerY())
+        clickText("目录")
+        clickText("第一章 雨夜来信")
+        readerBody()
+    }
+
+    private fun assertHighlightVisible(rgb: Int) {
+        val deadline = SystemClock.uptimeMillis() + 5_000
+        while (SystemClock.uptimeMillis() < deadline) {
+            val bounds = readerBody().visibleBounds
+            val bitmap = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
+                ?: error("Could not capture the highlighted page")
+            val matched = try {
+                val width = bounds.width()
+                val pixels = IntArray(width * bounds.height())
+                bitmap.getPixels(pixels, 0, width, bounds.left, bounds.top, width, bounds.height())
+                val background = pixels.asSequence().filterIndexed { index, _ -> index % 16 == 0 }
+                    .groupingBy { it }.eachCount().maxBy { it.value }.key
+                fun channel(foreground: Int, behind: Int) = (foreground * 128 + behind * 127 + 127) / 255
+                val red = channel(Color.red(rgb), Color.red(background))
+                val green = channel(Color.green(rgb), Color.green(background))
+                val blue = channel(Color.blue(rgb), Color.blue(background))
+                pixels.count {
+                    kotlin.math.abs(Color.red(it) - red) <= 2 &&
+                        kotlin.math.abs(Color.green(it) - green) <= 2 &&
+                        kotlin.math.abs(Color.blue(it) - blue) <= 2
+                } >= 10
+            } finally { bitmap.recycle() }
+            if (matched) return
+            SystemClock.sleep(200)
+        }
+        error("Expected highlight color did not render on the page: ${rgb.toString(16)}")
     }
 
     private fun editField(): UiObject2 = device.wait(
@@ -199,24 +239,7 @@ class ReleaseSelectionJourney {
         5_000,
     ) ?: error("Note edit field is missing")
 
-    private fun readerBody(): UiObject2 {
-        val deadline = SystemClock.uptimeMillis() + RELEASE_SELECTION_TIMEOUT
-        while (SystemClock.uptimeMillis() < deadline) {
-            val candidate = device.findObjects(By.clazz("android.widget.TextView"))
-                .mapNotNull { node ->
-                    runCatching {
-                        node.takeIf {
-                            it.visibleBounds.width() > device.displayWidth / 2 &&
-                                it.text.orEmpty().length >= 40
-                        }
-                    }.getOrNull()
-                }
-                .maxByOrNull { node -> runCatching { node.text.orEmpty().length }.getOrDefault(0) }
-            if (candidate != null) return candidate
-            SystemClock.sleep(200)
-        }
-        error("Reader body TextView did not become visible")
-    }
+    private fun readerBody(): UiObject2 = waitForReaderBody(device, RELEASE_SELECTION_TIMEOUT)
 
     private fun swipeForward() {
         val bounds = readerBody().visibleBounds
