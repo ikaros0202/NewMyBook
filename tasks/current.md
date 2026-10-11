@@ -2,7 +2,7 @@
 
 ## 2026-10-11：源码提交与 Release 构建
 
-用户授权提交当前工作区并推送 GitHub，构建本地 1.0.2 / 10 Release。最新交付、签名和验证边界见 [Release 记录](../qa/current/1.0.2/release-2026-10-11/README.md)。本轮不创建 GitHub Release。私人回归资料可放在被 Git 忽略的 `private-local/qa/`；此前迁入的三个历史资料目录及校验清单已按用户要求删除。以下状态描述各历史验收轮次。
+用户授权提交当前工作区并推送 GitHub，构建本地 1.0.2 / 10 Release。最新交付、签名和验证边界见 [Release 记录](../qa/current/1.0.2/release-2026-10-11/README.md)。GitHub Release v1.0.2 已发布，包含 APK 和 SHA-256 校验文件。私人回归资料可放在被 Git 忽略的 `private-local/qa/`；此前迁入的三个历史资料目录及校验清单已按用户要求删除。以下状态描述各历史验收轮次。
 
 更新：2026-10-02。产品入口：[当前基线](../docs/BASELINE.md)；简短现状：[开发基线](../docs/DEVELOPMENT.md)。
 

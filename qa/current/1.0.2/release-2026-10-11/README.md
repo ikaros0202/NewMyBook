@@ -1,6 +1,8 @@
 # 1.0.2 Release 构建与源码交付
 
-日期：2026-10-11。用户授权将当前工作区提交 Git、推送 GitHub，并构建本地 Release。版本保持 `1.0.2 / versionCode 10`，应用 ID 为 `com.xinyue.reader`。本次未创建 GitHub Release 或上传 APK 附件。
+日期：2026-10-11。用户授权将当前工作区提交 Git、推送 GitHub、构建 Release，并补齐 APK 发布。版本保持 `1.0.2 / versionCode 10`，应用 ID 为 `com.xinyue.reader`。[GitHub Release v1.0.2](https://github.com/ikaros0202/NewMyBook/releases/tag/v1.0.2) 已发布，附件包含 APK 和 SHA-256 校验文件。
+
+Release 标签指向实际构建源码提交 `8bfa6b76471425335bd2f61cbc478b5490f669c7`。上传后重新下载 APK，SHA-256 与本机产物完全一致；重新核对包名、版本、最低 API、目标 API 和签名均通过。后续下载入口与发布记录修改属于文档更新，不改变该 APK。
 
 ## 交付内容
 

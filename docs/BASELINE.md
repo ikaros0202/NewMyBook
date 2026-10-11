@@ -1,6 +1,6 @@
 # 新阅 1.0.2 当前产品基线
 
-建立日期：2026-09-29。1.0.0 保留为从当前完整软件继续维护的统一起始源码基线；建立时构建配置为 `versionName = "1.0.0"`、`versionCode = 8`，应用 ID 仍为 `com.xinyue.reader`。1.0.1 的连续阅读修复作为继承能力保留；当前构建配置为 `versionName = "1.0.2"`、`versionCode = 10`。2026-10-11 用户授权提交当前源码、推送 GitHub 并构建本地 Release，交付见 [Release 记录](../qa/current/1.0.2/release-2026-10-11/README.md)；此前定向验证见 [1.0.2 QA 记录](../qa/current/1.0.2/README.md)。本次未创建 GitHub Release。
+建立日期：2026-09-29。1.0.0 保留为从当前完整软件继续维护的统一起始源码基线；建立时构建配置为 `versionName = "1.0.0"`、`versionCode = 8`，应用 ID 仍为 `com.xinyue.reader`。1.0.1 的连续阅读修复作为继承能力保留；当前构建配置为 `versionName = "1.0.2"`、`versionCode = 10`。2026-10-11 用户授权提交当前源码、推送 GitHub 并构建本地 Release，交付见 [Release 记录](../qa/current/1.0.2/release-2026-10-11/README.md)；此前定向验证见 [1.0.2 QA 记录](../qa/current/1.0.2/README.md)。GitHub Release v1.0.2 已发布，包含 APK 和 SHA-256 校验文件。
 
 过去的 V1.2–V1.7、V1.7 B 是开发阶段名称。它们已经合并为本页描述的当前产品，不再作为并行的当前需求。过去本地 0.1.6 安装包和 GitHub 0.1.4 发布物属于历史产物，不能代表当前 1.0.0 源码。
 
